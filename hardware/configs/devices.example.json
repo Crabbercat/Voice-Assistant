@@ -1,0 +1,11 @@
+{
+  "devices": [
+    {
+      "id": "living-room-light",
+      "name": "Đèn phòng khách",
+      "type": "light",
+      "pin": 17
+    }
+  ]
+}
+

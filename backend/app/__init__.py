@@ -1,0 +1,2 @@
+"""VietHome-AI backend application."""
+
