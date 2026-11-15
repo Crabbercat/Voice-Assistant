@@ -1,0 +1,8 @@
+
+-r base.txt
+
+torch
+transformers
+sounddevice
+soundfile
+scipy
