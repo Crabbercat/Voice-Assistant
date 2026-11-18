@@ -80,6 +80,76 @@ Mở `http://localhost:5173`. Trong phần **Cài đặt** của giao diện, nh
 
 Lưu ý: backend hiện chỉ cho phép CORS từ `localhost:5173` và `127.0.0.1:5173`. Vì vậy, nếu mở giao diện Flutter trực tiếp từ một thiết bị khác bằng địa chỉ IP LAN của máy chạy giao diện, cần bổ sung origin đó vào cấu hình CORS trong `backend/app/main.py`.
 
+## Chạy backend trên Raspberry Pi
+
+Hướng dẫn này dùng Raspberry Pi OS 64-bit. Raspberry Pi và thiết bị truy cập cần kết nối cùng mạng Wi-Fi/LAN.
+
+### 1. Cài công cụ cần thiết
+
+Mở Terminal trên Raspberry Pi:
+
+```bash
+sudo apt update
+sudo apt install -y git python3 python3-venv python3-pip
+```
+
+### 2. Tải dự án và cài dependencies
+
+Thay `<URL-repository>` bằng địa chỉ Git repository của dự án:
+
+```bash
+git clone <URL-repository> VietHome-AI
+cd VietHome-AI
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements/development.txt
+```
+
+### 3. Tạo cấu hình backend
+
+```bash
+cp backend/.env.example backend/.env
+nano backend/.env
+```
+
+Đảm bảo file `backend/.env` có các giá trị sau:
+
+```dotenv
+HOST=0.0.0.0
+PORT=8000
+```
+
+Trong `nano`, nhấn `Ctrl+O`, `Enter` để lưu rồi nhấn `Ctrl+X` để thoát.
+
+### 4. Khởi chạy backend
+
+Từ thư mục gốc dự án, khi môi trường ảo đang được kích hoạt, chạy:
+
+```bash
+uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+```
+
+Giữ Terminal mở để backend tiếp tục chạy. Nhấn `Ctrl+C` để dừng backend.
+
+### 5. Truy cập từ thiết bị khác
+
+Tìm địa chỉ IP của Raspberry Pi:
+
+```bash
+hostname -I
+```
+
+Từ điện thoại hoặc máy tính cùng mạng, mở địa chỉ dưới đây và thay `IP_RASPBERRY_PI` bằng IP vừa tìm được:
+
+```text
+http://IP_RASPBERRY_PI:8000/docs
+```
+
+Ví dụ: `http://192.168.1.25:8000/docs`. Trong ứng dụng Flutter, nhập `http://IP_RASPBERRY_PI:8000` ở phần **Cài đặt**. Không dùng `localhost` hoặc `127.0.0.1` trên thiết bị khác, vì các địa chỉ đó trỏ về chính thiết bị đang sử dụng.
+
+Chỉ cho phép truy cập backend trong mạng tin cậy; không mở cổng `8000` trực tiếp ra Internet công cộng.
+
 ## Kiểm thử
 
 ```powershell
