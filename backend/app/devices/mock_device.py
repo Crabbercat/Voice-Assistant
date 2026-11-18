@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # GPIO theo chuẩn BCM
 DHT_PIN = 4
 LED_PIN = 18
+BED_LED_PIN = 22  
 
 # Dữ liệu cảm biến
 _sensor_lock = threading.Lock()
@@ -35,19 +36,31 @@ class MockDevice(BaseDevice):
 
         self._led = None
 
-        # Chỉ thiết bị "light" dùng GPIO18.
-        # Các thiết bị còn lại giữ nguyên chế độ mock.
-        if device_id == "light" and not settings.MOCK_HARDWARE:
+        # Anh xa ten thiet bi voi chan GPIO
+        led_pins = {
+            "light": LED_PIN,
+            "light_bed": BED_LED_PIN,
+        }
+
+        if device_id in led_pins and not settings.MOCK_HARDWARE:
             from gpiozero import LED
 
+            pin = led_pins[device_id]
+
             self._led = LED(
-                LED_PIN,
+                pin,
                 active_high=True,
                 initial_value=False
             )
 
             self.is_on = self._led.is_lit
-            logger.info("LED khoi tao tai GPIO%d", LED_PIN)
+
+            logger.info(
+                "Khoi tao %s tai GPIO%d",
+                device_id,
+                pin
+            )
+
 
     def turn_on(self) -> None:
         if self._led is not None:
