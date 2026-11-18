@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Cau hinh servo
 SERVO_PIN = 27
-DOOR_OPEN_ANGLE = 120
+DOOR_OPEN_ANGLE = 140
 DOOR_CLOSE_ANGLE = 0
 
 
