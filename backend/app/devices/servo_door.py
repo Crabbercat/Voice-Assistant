@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Cau hinh servo
 SERVO_PIN = 27
-DOOR_OPEN_ANGLE = 90
+DOOR_OPEN_ANGLE = 120
 DOOR_CLOSE_ANGLE = 0
 
 
@@ -27,8 +27,8 @@ class ServoDoor(BaseDevice):
             SERVO_PIN,
             min_angle=0,
             max_angle=180,
-            min_pulse_width=0.001,
-            max_pulse_width=0.002,
+            min_pulse_width=0.0009,
+            max_pulse_width=0.0021,
             initial_angle=None,
         )
 
