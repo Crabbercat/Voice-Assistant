@@ -2,6 +2,9 @@ from app.devices.registry import device_registry
 
 
 class DeviceService:
+    def __init__(self) -> None:
+        self.last_action: str | None = None
+
     def get_devices(self) -> list[dict[str, object]]:
         return [device.get_status() for device in device_registry.get_all()]
 
@@ -15,6 +18,8 @@ class DeviceService:
         else:
             device.turn_off()
 
+        verb = ("Mở" if is_on else "Đóng") if device_id == "door" else ("Bật" if is_on else "Tắt")
+        self.last_action = f"{verb} {device.name}"
         return device.get_status()
 
 
