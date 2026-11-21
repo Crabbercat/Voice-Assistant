@@ -17,12 +17,12 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    app.include_router(fan_router),
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="AI-powered Vietnamese Voice-Controlled Smart Home",
     lifespan=lifespan,
 )
+app.include_router(fan_router)
 
 app.add_middleware(
     CORSMiddleware,
