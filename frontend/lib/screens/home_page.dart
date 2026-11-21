@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:cupertino_ui/cupertino_ui.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
-import 'package:material_ui/material_ui.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:viethome_frontend/models/dashboard_snapshot.dart';
 import 'package:viethome_frontend/models/smart_device.dart';
 import 'package:viethome_frontend/services/home_api.dart';
+
+import '../widgets/fan_blades_icon.dart';
+import '../widgets/fan_speed_card.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,27 +22,37 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  static const Color _blueActive = Color(0xFF2196F3);
-  static const Color _greenOnline = Color(0xFF00E676);
+  static const Color _blue = Color(0xFF2196F3);
   static const Color _cyan = Color(0xFF00E5FF);
-  static const String _defaultBackendUrl = 'http://127.0.0.1:8000';
+  static const Color _green = Color(0xFF00E676);
+  static const Color _secondaryText = Color(0xFFB9C5D8);
+
+  static const String _defaultUrl = 'http://127.0.0.1:8000';
 
   final HomeApi _homeApi = HomeApi();
-  String _backendBaseUrl = _defaultBackendUrl;
-  final TextEditingController _serverAddressController =
-      TextEditingController(text: _defaultBackendUrl);
+  final TextEditingController _serverController =
+      TextEditingController(text: _defaultUrl);
+
+  String _backendBaseUrl = _defaultUrl;
+  String _lastAction = 'Chưa có thao tác';
 
   bool _serverConnected = false;
-  bool _isSavingServer = false;
+  bool _savingServer = false;
+  bool _readingDashboard = false;
+
+  int _failedRequests = 0;
   int _selectedTab = 0;
-  String _lastAction = 'Chưa có thao tác';
+
   Timer? _statusTimer;
 
-  final List<String> _activityHistory = [];
-  final Set<String> _pendingDevices = {};
-  List<SmartDevice> _devices = [];
   double? _temperature;
   double? _humidity;
+
+  List<SmartDevice> _devices = [];
+
+  final List<String> _history = [];
+  final Set<String> _pendingDevices = {};
+  final Map<String, bool> _optimisticStates = {};
 
   @override
   void initState() {
@@ -49,7 +63,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _statusTimer?.cancel();
-    _serverAddressController.dispose();
+    _serverController.dispose();
     _homeApi.close();
     super.dispose();
   }
@@ -57,66 +71,127 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadServerAddress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _backendBaseUrl = prefs.getString('backend_base_url') ??
-          _backendBaseUrl;
+      _backendBaseUrl = prefs.getString('backend_base_url') ?? _defaultUrl;
     } catch (error) {
-      debugPrint('Cannot load saved server URL: $error');
+      debugPrint('Load server error: $error');
     }
-    _serverAddressController.text = _backendBaseUrl;
+
     if (!mounted) return;
-    await _fetchStatusAndUpdate();
-    _statusTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => _fetchStatusAndUpdate());
+
+    _serverController.text = _backendBaseUrl;
+
+    await _fetchDashboard();
+
+    if (!mounted) return;
+
+    _statusTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _fetchDashboard(),
+    );
   }
 
-  String _buildServerUrl() {
-    final rawAddress = _serverAddressController.text.trim();
-    if (rawAddress.isEmpty) throw const FormatException('Bạn chưa nhập địa chỉ Server.');
-    final normalized = rawAddress.contains('://') ? rawAddress : 'http://$rawAddress';
-    final parsed = Uri.tryParse(normalized);
-    if (parsed == null || parsed.host.isEmpty || !parsed.hasAuthority) {
-      throw const FormatException('Địa chỉ Server không hợp lệ.');
+  String _normalizeServerUrl() {
+    final raw = _serverController.text.trim();
+
+    if (raw.isEmpty) {
+      throw const FormatException('Chưa nhập địa chỉ Server.');
     }
-    if (parsed.scheme != 'http' && parsed.scheme != 'https') {
-      throw const FormatException('Server chỉ hỗ trợ địa chỉ HTTP hoặc HTTPS.');
+
+    final normalized = raw.contains('://') ? raw : 'http://$raw';
+
+    final uri = Uri.tryParse(normalized);
+
+    if (uri == null ||
+        uri.host.isEmpty ||
+        !uri.hasAuthority ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
+      throw const FormatException(
+        'Địa chỉ Server không hợp lệ.',
+      );
     }
-    final port = parsed.hasPort ? parsed.port : 8000;
+
+    final port = uri.hasPort ? uri.port : 8000;
+
     if (port < 1 || port > 65535) {
-      throw const FormatException('Cổng phải nằm trong khoảng 1–65535.');
+      throw const FormatException('Cổng không hợp lệ.');
     }
-    return Uri(scheme: parsed.scheme, host: parsed.host, port: port).toString();
+
+    return Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: port,
+    ).toString();
   }
 
-  Future<void> _saveServerAddress() async {
+  Future<void> _saveServer() async {
     String address;
+
     try {
-      address = _buildServerUrl();
+      address = _normalizeServerUrl();
     } on FormatException catch (error) {
-      _showErrorSnackBar(error.message);
+      _showMessage(error.message, isError: true);
       return;
     }
-    setState(() => _isSavingServer = true);
+
+    setState(() => _savingServer = true);
+
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('backend_base_url', address);
+
       if (!mounted) return;
-      setState(() => _backendBaseUrl = address);
-      await _fetchStatusAndUpdate();
-      if (_serverConnected) {
-        _showSuccessSnackBar('Đã lưu và kết nối Server thành công.');
-      } else {
-        _showErrorSnackBar('Đã lưu địa chỉ, nhưng chưa kết nối được Server.');
-      }
+
+      setState(() {
+        _backendBaseUrl = address;
+        _serverConnected = false;
+        _failedRequests = 0;
+        _devices = [];
+        _temperature = null;
+        _humidity = null;
+      });
+
+      await _fetchDashboard();
+
+      if (!mounted) return;
+
+      _showMessage(
+        _serverConnected
+            ? 'Đã kết nối Server thành công.'
+            : 'Đã lưu địa chỉ. Đang kiểm tra kết nối.',
+        isError: !_serverConnected,
+      );
     } catch (error) {
-      _showErrorSnackBar('Không thể lưu địa chỉ Server: $error');
+      _showMessage(
+        'Không thể lưu Server: $error',
+        isError: true,
+      );
     } finally {
-      if (mounted) setState(() => _isSavingServer = false);
+      if (mounted) {
+        setState(() => _savingServer = false);
+      }
     }
   }
 
-  Future<void> _fetchStatusAndUpdate({bool reportErrors = false}) async {
+  Future<void> _fetchDashboard({
+    bool reportErrors = false,
+  }) async {
+    if (_readingDashboard || _pendingDevices.isNotEmpty) {
+      return;
+    }
+
+    _readingDashboard = true;
+    final requestUrl = _backendBaseUrl;
+
     try {
-      final DashboardSnapshot dashboard = await _homeApi.fetchDashboard(_backendBaseUrl);
-      if (!mounted) return;
+      final DashboardSnapshot dashboard =
+          await _homeApi.fetchDashboard(requestUrl);
+
+      if (!mounted || requestUrl != _backendBaseUrl) {
+        return;
+      }
+
+      _failedRequests = 0;
+
       setState(() {
         _serverConnected = true;
         _devices = dashboard.devices;
@@ -125,93 +200,177 @@ class _HomePageState extends State<HomePage> {
         _lastAction = dashboard.lastAction ?? 'Chưa có thao tác';
       });
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _serverConnected = false);
-      if (reportErrors) {
-        _showErrorSnackBar('Không thể cập nhật dữ liệu: $error');
+      if (!mounted || requestUrl != _backendBaseUrl) {
+        return;
       }
-    }
-  }
 
-  Future<void> _toggleDeviceManually(SmartDevice device, bool value) async {
-    if (_pendingDevices.contains(device.deviceId)) return;
-    setState(() => _pendingDevices.add(device.deviceId));
-    try {
-      final updated = await _homeApi.setDeviceState(
-        baseUrl: _backendBaseUrl,
-        deviceId: device.deviceId,
-        isOn: value,
-      );
-      if (!mounted) return;
-      setState(() {
-        _devices = _devices
-            .map((current) => current.deviceId == updated.deviceId ? updated : current)
-            .toList(growable: false);
-      });
-      _addActivity('${_actionLabel(device, updated.isOn)} ${device.name}');
-      await _fetchStatusAndUpdate();
-    } catch (error) {
-      if (mounted) {
+      _failedRequests++;
+
+      if (_failedRequests >= 3 && _serverConnected) {
         setState(() => _serverConnected = false);
-        _showErrorSnackBar('Không gửi được lệnh: $error');
+      }
+
+      if (reportErrors) {
+        _showMessage(
+          'Không thể cập nhật: $error',
+          isError: true,
+        );
       }
     } finally {
-      if (mounted) setState(() => _pendingDevices.remove(device.deviceId));
+      _readingDashboard = false;
     }
   }
 
-  String _actionLabel(SmartDevice device, bool isOn) {
-    if (device.deviceId == 'door') return isOn ? 'Mở' : 'Đóng';
-    return isOn ? 'Bật' : 'Tắt';
+  Future<void> _toggleDevice(
+    SmartDevice device,
+    bool isOn,
+  ) async {
+    if (_pendingDevices.contains(device.deviceId)) {
+      return;
+    }
+
+    final requestUrl = _backendBaseUrl;
+
+    setState(() {
+      _pendingDevices.add(device.deviceId);
+      _optimisticStates[device.deviceId] = isOn;
+    });
+
+    try {
+      final updated = await _homeApi.setDeviceState(
+        baseUrl: requestUrl,
+        deviceId: device.deviceId,
+        isOn: isOn,
+      );
+
+      if (!mounted || requestUrl != _backendBaseUrl) {
+        return;
+      }
+
+      setState(() {
+        _devices = _devices
+            .map(
+              (item) => item.deviceId == updated.deviceId ? updated : item,
+            )
+            .toList(growable: false);
+      });
+
+      final action = device.deviceId == 'door'
+          ? (updated.isOn ? 'Mở' : 'Đóng')
+          : (updated.isOn ? 'Bật' : 'Tắt');
+
+      _addHistory('$action ${device.name}');
+    } catch (error) {
+      if (mounted) {
+        _showMessage(
+          'Không gửi được lệnh: $error',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pendingDevices.remove(device.deviceId);
+          _optimisticStates.remove(device.deviceId);
+        });
+
+        _fetchDashboard();
+      }
+    }
   }
 
-  void _addActivity(String message) {
-    if (!mounted) return;
+  void _addHistory(String action) {
     final now = DateTime.now();
-    final time = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final time = '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}';
+
+    if (!mounted) return;
+
     setState(() {
-      _activityHistory.insert(0, '$time  •  $message');
-      if (_activityHistory.length > 30) _activityHistory.removeLast();
+      _history.insert(0, '$time  •  $action');
+      if (_history.length > 30) {
+        _history.removeLast();
+      }
     });
   }
 
-  void _showErrorSnackBar(String message) {
+  void _showMessage(
+    String message, {
+    bool isError = false,
+  }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: const Color(0xFF8F303C), content: Text(message)));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor:
+            isError ? const Color(0xFF8F303C) : const Color(0xFF176B50),
+        content: Text(message),
+      ),
+    );
   }
 
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: const Color(0xFF176B50), content: Text(message)));
+  String _formatValue(
+    double? value,
+    int decimals,
+    String suffix,
+  ) {
+    if (value == null) return '—';
+    return '${value.toStringAsFixed(decimals)}$suffix';
+  }
+
+  IconData _deviceIcon(SmartDevice device) {
+    return switch (device.deviceId) {
+      'light' => Icons.lightbulb_rounded,
+      'door' => Icons.door_front_door_rounded,
+      'light_bed' => Icons.nightlight_round,
+      'fan' => Icons.air_rounded,
+      _ => Icons.devices_other_rounded,
+    };
+  }
+
+  Color _deviceColor(SmartDevice device) {
+    return switch (device.deviceId) {
+      'light' || 'light_bed' => const Color(0xFFFFCA28),
+      'door' => const Color(0xFFFF9800),
+      'fan' => const Color(0xFF29B6F6),
+      _ => _cyan,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final isSettingsPage = _selectedTab == 3;
-
     return Scaffold(
       extendBody: true,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          const _AbstractDarkBackground(),
+          const _DarkBackground(),
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1200),
               child: IndexedStack(
                 index: _selectedTab,
-                children: <Widget>[
+                children: [
                   _buildDashboardPage(),
-                  SafeArea(bottom: false, child: _buildHistoryPage()),
-                  SafeArea(bottom: false, child: _buildStatisticsPage()),
-                  SafeArea(bottom: false, child: _buildSettingsPage()),
+                  SafeArea(
+                    bottom: false,
+                    child: _buildHistoryPage(),
+                  ),
+                  SafeArea(
+                    bottom: false,
+                    child: _buildStatisticsPage(),
+                  ),
+                  SafeArea(
+                    bottom: false,
+                    child: _buildSettingsPage(),
+                  ),
                 ],
               ),
             ),
           ),
         ],
       ),
-      bottomNavigationBar: isSettingsPage ? null : _buildBottomNavigationBar(),
+      bottomNavigationBar: _selectedTab == 3 ? null : _buildNavigationBar(),
     );
   }
 
@@ -223,38 +382,51 @@ class _HomePageState extends State<HomePage> {
       color: _cyan,
       backgroundColor: const Color(0xFF14203A),
       edgeOffset: topInset,
-      onRefresh: _fetchStatusAndUpdate,
+      onRefresh: _fetchDashboard,
       child: ListView(
         padding: const EdgeInsets.only(bottom: 120),
         physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
         ),
         children: [
-          // Ảnh ngôi nhà tràn lên sát mép trên, tiêu đề nằm đè lên ảnh,
-          // bảng cảm biến đè lên phần mờ dần ở đáy ảnh.
           Stack(
             children: [
-              _buildHeroImageBanner(heroHeight),
+              _buildHeroBanner(heroHeight),
               Padding(
-                padding: EdgeInsets.fromLTRB(20, topInset + 10, 12, 0),
-                child: _buildTopHeaderBar(),
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  topInset + 10,
+                  12,
+                  0,
+                ),
+                child: _buildHeader(),
               ),
               Padding(
-                padding: EdgeInsets.only(top: heroHeight - 46),
-                child: _buildSensorGlassPanel(),
+                padding: EdgeInsets.only(
+                  top: heroHeight - 46,
+                ),
+                child: _buildSensorPanel(),
               ),
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+            padding: const EdgeInsets.fromLTRB(
+              16,
+              18,
+              16,
+              0,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionTitle('Thiết bị trong nhà', Icons.home_filled),
-                const SizedBox(height: 12),
-                _buildDeviceGrid(),
+                _sectionTitle(
+                  'Thiết bị trong nhà',
+                  Icons.home_filled,
+                ),
                 const SizedBox(height: 14),
-                _buildVoiceControlPanel(),
+                _buildDeviceGrid(),
+                const SizedBox(height: 16),
+                _buildVoicePanel(),
               ],
             ),
           ),
@@ -263,8 +435,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildTopHeaderBar() {
-    const textShadow = [Shadow(color: Colors.black87, blurRadius: 10)];
+  Widget _buildHeader() {
     return Row(
       children: [
         SizedBox(
@@ -276,18 +447,22 @@ class _HomePageState extends State<HomePage> {
                 alignment: Alignment.bottomLeft,
                 child: Icon(
                   Icons.home_outlined,
-                  color: _blueActive,
+                  color: _blue,
                   size: 46,
-                  shadows: [Shadow(color: _blueActive.withValues(alpha: 0.9), blurRadius: 16)],
+                  shadows: [
+                    Shadow(
+                      color: _blue.withValues(alpha: 0.8),
+                      blurRadius: 16,
+                    ),
+                  ],
                 ),
               ),
-              Align(
+              const Align(
                 alignment: Alignment.topRight,
                 child: Icon(
                   Icons.wifi_rounded,
                   color: _cyan,
                   size: 18,
-                  shadows: [Shadow(color: _cyan.withValues(alpha: 0.9), blurRadius: 10)],
                 ),
               ),
             ],
@@ -301,57 +476,51 @@ class _HomePageState extends State<HomePage> {
               Text(
                 'Smart Home',
                 style: TextStyle(
+                  color: Colors.white,
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 0.3,
-                  shadows: textShadow,
                 ),
               ),
               Text(
                 'Ngôi nhà thông minh của bạn',
-                style: TextStyle(fontSize: 13, color: Colors.white, shadows: textShadow),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
         ),
         IconButton(
           onPressed: () => setState(() => _selectedTab = 3),
-          icon: const Icon(Icons.settings, color: Colors.white, size: 28, shadows: textShadow),
+          icon: const Icon(
+            Icons.settings,
+            color: Colors.white,
+            size: 28,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildHeroImageBanner(double height) {
-    const Color fadeColor = Color(0xFF040A18);
+  Widget _buildHeroBanner(double height) {
+    const fadeColor = Color(0xFF040A18);
 
     return SizedBox(
-      height: height,
       width: double.infinity,
+      height: height,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Ảnh phủ toàn bộ khu vực đầu trang, kể cả phía sau thanh tiêu đề.
-          // Không để lộ nền cũ ở phía trên nên sẽ không còn đường ranh hai màu.
           Image.asset(
             'assets/images/smart_home_house.jpg',
             fit: BoxFit.cover,
-            alignment: Alignment.center,
             errorBuilder: (context, error, stackTrace) {
-              return const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF071A3B), fadeColor],
-                  ),
-                ),
+              return const ColoredBox(
+                color: Color(0xFF071A3B),
               );
             },
           ),
-          // Lớp phủ mỏng giúp chữ/icon dễ đọc; chỉ phần đáy mới mờ hẳn
-          // về đúng màu nền của ứng dụng để hòa với nội dung bên dưới.
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -363,7 +532,7 @@ class _HomePageState extends State<HomePage> {
                   Color(0x66020817),
                   fadeColor,
                 ],
-                stops: [0.0, 0.48, 0.78, 1.0],
+                stops: [0, 0.48, 0.78, 1],
               ),
             ),
           ),
@@ -372,62 +541,68 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSensorGlassPanel() {
+  Widget _buildSensorPanel() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: _GlassPanel(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 7,
+          vertical: 14,
+        ),
         borderRadius: 22,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _SensorItem(
               icon: Icons.thermostat_rounded,
-              iconColor: const Color(0xFFFFB74D),
-              value: _formatMeasurement(_temperature, 1, '°C'),
+              color: const Color(0xFFFFB74D),
+              value: _formatValue(_temperature, 1, '°C'),
               label: 'Nhiệt độ',
             ),
             _SensorItem(
               icon: Icons.water_drop_rounded,
-              iconColor: const Color(0xFF4FC3F7),
-              value: _formatMeasurement(_humidity, 0, '%'),
+              color: const Color(0xFF4FC3F7),
+              value: _formatValue(_humidity, 0, '%'),
               label: 'Độ ẩm',
             ),
-            Container(width: 1, height: 40, color: Colors.white24),
+            Container(
+              width: 1,
+              height: 40,
+              color: Colors.white24,
+            ),
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 10,
-                      height: 10,
+                      width: 9,
+                      height: 9,
                       decoration: BoxDecoration(
-                        color: _serverConnected ? _greenOnline : Colors.redAccent,
+                        color: _serverConnected ? _green : Colors.redAccent,
                         shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (_serverConnected ? _greenOnline : Colors.redAccent).withValues(alpha: 0.5),
-                            blurRadius: 6,
-                            spreadRadius: 1,
-                          )
-                        ],
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Text(
                       _serverConnected ? 'Online' : 'Offline',
                       style: TextStyle(
-                        color: _serverConnected ? _greenOnline : Colors.redAccent,
-                        fontSize: 15,
+                        color: _serverConnected ? _green : Colors.redAccent,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text('Trạng thái', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                const Text(
+                  'Trạng thái',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           ],
@@ -436,12 +611,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSectionTitle(String title, IconData icon) {
+  Widget _sectionTitle(
+    String title,
+    IconData icon,
+  ) {
     return Row(
       children: [
-        Icon(icon, color: _blueActive, size: 24),
+        Icon(icon, color: _blue, size: 26),
         const SizedBox(width: 10),
-        Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ],
     );
   }
@@ -450,7 +635,10 @@ class _HomePageState extends State<HomePage> {
     if (_devices.isEmpty) {
       return const _GlassPanel(
         child: Center(
-          child: Text('Chưa có thiết bị từ máy chủ.', style: TextStyle(color: Colors.white60)),
+          child: Text(
+            'Chưa có thiết bị từ máy chủ.',
+            style: TextStyle(color: _secondaryText),
+          ),
         ),
       );
     }
@@ -464,44 +652,70 @@ class _HomePageState extends State<HomePage> {
         maxCrossAxisExtent: 300,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.4,
+        mainAxisExtent: 205,
       ),
       itemBuilder: (context, index) {
         final device = _devices[index];
+
+        if (device.deviceId == 'fan') {
+          return FanSpeedCard(
+            key: const ValueKey('fan-speed-card'),
+            baseUrl: _backendBaseUrl,
+            name: device.name,
+            room: device.room,
+            initialIsOn: device.isOn,
+            onStateChanged: _fetchDashboard,
+          );
+        }
+
         return SmartDeviceCard(
           name: device.name,
           room: device.room,
-          icon: _iconFor(device),
-          isActive: device.isOn,
-          activeColor: _colorFor(device),
+          icon: _deviceIcon(device),
+          isActive: _optimisticStates[device.deviceId] ?? device.isOn,
+          activeColor: _deviceColor(device),
           onChanged: _pendingDevices.contains(device.deviceId)
               ? null
-              : (value) => _toggleDeviceManually(device, value),
+              : (value) => _toggleDevice(device, value),
         );
       },
     );
   }
 
-  Widget _buildVoiceControlPanel() {
+  Widget _buildVoicePanel() {
     return const _GlassPanel(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      padding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 18,
+      ),
       borderRadius: 22,
       child: Row(
         children: [
-          Icon(Icons.mic_off_rounded, color: Colors.white54, size: 32),
-          SizedBox(width: 16),
+          Icon(
+            Icons.mic_off_rounded,
+            color: Colors.white54,
+            size: 32,
+          ),
+          SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Điều khiển giọng nói chưa khả dụng',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                SizedBox(height: 4),
+                SizedBox(height: 5),
                 Text(
-                  'STT/TTS chưa được triển khai trong giai đoạn này.',
-                  style: TextStyle(fontSize: 12, color: Colors.white70),
+                  'STT/TTS chưa được triển khai.',
+                  style: TextStyle(
+                    color: _secondaryText,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -511,31 +725,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  IconData _iconFor(SmartDevice device) {
-    return switch (device.deviceId) {
-      'light' => Icons.lightbulb_rounded,
-      'door' => Icons.door_front_door_rounded,
-      'light_bed' => Icons.bed_rounded,
-      'fan' => Icons.toys_rounded,
-      _ => Icons.devices_other_rounded,
-    };
-  }
-
-  Color _colorFor(SmartDevice device) {
-    return switch (device.deviceId) {
-      'light' || 'light_bed' => const Color(0xFFFFCA28),
-      'door' => const Color(0xFFFF9800),
-      'fan' => const Color(0xFF29B6F6),
-      _ => _cyan,
-    };
-  }
-
-  String _formatMeasurement(double? value, int fractionDigits, String unit) {
-    if (value == null) return '—';
-    return '${value.toStringAsFixed(fractionDigits)}$unit';
-  }
-
-  Widget _buildBottomNavigationBar() {
+  Widget _buildNavigationBar() {
     return SafeArea(
       top: false,
       child: Padding(
@@ -543,20 +733,25 @@ class _HomePageState extends State<HomePage> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(26),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            filter: ImageFilter.blur(
+              sigmaX: 20,
+              sigmaY: 20,
+            ),
             child: Container(
               height: 66,
               decoration: BoxDecoration(
                 color: const Color(0xFF0D162B).withValues(alpha: 0.85),
                 borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
               ),
               child: Row(
                 children: [
-                  _buildNavItem(0, Icons.home_rounded, 'Trang chủ'),
-                  _buildNavItem(1, Icons.history_rounded, 'Lịch sử'),
-                  _buildNavItem(2, Icons.bar_chart_rounded, 'Thống kê'),
-                  _buildNavItem(3, Icons.settings_rounded, 'Cài đặt'),
+                  _navItem(0, Icons.home_rounded, 'Trang chủ'),
+                  _navItem(1, Icons.history_rounded, 'Lịch sử'),
+                  _navItem(2, Icons.bar_chart_rounded, 'Thống kê'),
+                  _navItem(3, Icons.settings_rounded, 'Cài đặt'),
                 ],
               ),
             ),
@@ -566,9 +761,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    final isSelected = _selectedTab == index;
-    final color = isSelected ? _blueActive : Colors.white60;
+  Widget _navItem(
+    int index,
+    IconData icon,
+    String label,
+  ) {
+    final selected = _selectedTab == index;
+    final color = selected ? _blue : Colors.white60;
+
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -576,19 +776,14 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              color: color,
-              size: 26,
-              shadows: isSelected ? [Shadow(color: _blueActive.withValues(alpha: 0.7), blurRadius: 10)] : null,
-            ),
+            Icon(icon, size: 26, color: color),
             const SizedBox(height: 3),
             Text(
               label,
               style: TextStyle(
                 color: color,
                 fontSize: 11.5,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
               ),
             ),
           ],
@@ -602,34 +797,60 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
       physics: const BouncingScrollPhysics(),
       children: [
-        const Text('Lịch sử', style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 5),
-        const Text('Các thao tác điều khiển gần đây', style: TextStyle(color: Colors.white70)),
+        const Text(
+          'Lịch sử',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 27,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Các thao tác điều khiển gần đây',
+          style: TextStyle(
+            color: _secondaryText,
+            fontSize: 15,
+          ),
+        ),
         const SizedBox(height: 20),
         _GlassPanel(
-          child: _activityHistory.isEmpty
+          child: _history.isEmpty
               ? const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.history_rounded, size: 42, color: Colors.white38),
-                        SizedBox(height: 10),
-                        Text('Chưa có thao tác nào', style: TextStyle(color: Colors.white60)),
-                      ],
+                    child: Text(
+                      'Chưa có thao tác nào',
+                      style: TextStyle(
+                        color: _secondaryText,
+                        fontSize: 15,
+                      ),
                     ),
                   ),
                 )
               : Column(
-                  children: _activityHistory.map((entry) {
+                  children: _history.map((item) {
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                      ),
                       child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.check_circle_outline_rounded, color: _cyan, size: 20),
-                          const SizedBox(width: 11),
-                          Expanded(child: Text(entry, style: const TextStyle(color: Colors.white, height: 1.35))),
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            color: _cyan,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              item,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -637,16 +858,7 @@ class _HomePageState extends State<HomePage> {
                 ),
         ),
         const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: () => _fetchStatusAndUpdate(reportErrors: true),
-          icon: const Icon(Icons.refresh_rounded),
-          label: const Text('Cập nhật trạng thái'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _cyan,
-            side: BorderSide(color: _cyan.withValues(alpha: 0.55)),
-            padding: const EdgeInsets.symmetric(vertical: 13),
-          ),
-        ),
+        _refreshButton(),
       ],
     );
   }
@@ -656,9 +868,22 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 104),
       physics: const BouncingScrollPhysics(),
       children: [
-        const Text('Tổng quan', style: TextStyle(fontSize: 25, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 5),
-        const Text('Trạng thái hiện tại của ngôi nhà', style: TextStyle(color: Colors.white70)),
+        const Text(
+          'Tổng quan',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 27,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Trạng thái hiện tại của ngôi nhà',
+          style: TextStyle(
+            color: _secondaryText,
+            fontSize: 15,
+          ),
+        ),
         const SizedBox(height: 20),
         Row(
           children: [
@@ -666,7 +891,7 @@ class _HomePageState extends State<HomePage> {
               child: _StatCard(
                 icon: Icons.thermostat_rounded,
                 label: 'Nhiệt độ',
-                value: _formatMeasurement(_temperature, 1, '°C'),
+                value: _formatValue(_temperature, 1, '°C'),
                 color: const Color(0xFFFF9B72),
               ),
             ),
@@ -675,7 +900,7 @@ class _HomePageState extends State<HomePage> {
               child: _StatCard(
                 icon: Icons.water_drop_rounded,
                 label: 'Độ ẩm',
-                value: _formatMeasurement(_humidity, 1, '%'),
+                value: _formatValue(_humidity, 1, '%'),
                 color: _cyan,
               ),
             ),
@@ -686,27 +911,57 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Thiết bị', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
+              const Text(
+                'Thiết bị',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 14),
               if (_devices.isEmpty)
-                const Text('Chưa có thiết bị từ máy chủ.', style: TextStyle(color: Colors.white60))
+                const Text(
+                  'Chưa có thiết bị từ máy chủ.',
+                  style: TextStyle(color: _secondaryText),
+                )
               else
                 ..._devices.map((device) {
+                  final isOn = device.isOn;
                   final isDoor = device.deviceId == 'door';
+
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                    ),
                     child: Row(
                       children: [
-                        Icon(_iconFor(device), color: _colorFor(device), size: 23),
+                        device.deviceId == 'fan'
+                            ? const FanBladesIcon(size: 30)
+                            : Icon(
+                                _deviceIcon(device),
+                                color: _deviceColor(device),
+                                size: 30,
+                              ),
                         const SizedBox(width: 12),
-                        Expanded(child: Text(device.name)),
+                        Expanded(
+                          child: Text(
+                            device.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                         Text(
                           isDoor
-                              ? (device.isOn ? 'Đang mở' : 'Đã đóng')
-                              : (device.isOn ? 'Đang bật' : 'Đã tắt'),
+                              ? (isOn ? 'Đang mở' : 'Đã đóng')
+                              : (isOn ? 'Đang bật' : 'Đã tắt'),
                           style: TextStyle(
-                            color: device.isOn ? _greenOnline : Colors.white60,
-                            fontWeight: FontWeight.w600,
+                            color: isOn ? _green : _secondaryText,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
@@ -721,31 +976,55 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Hoạt động gần nhất', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              const Text(
+                'Hoạt động gần nhất',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 10),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.history_rounded, color: _cyan),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(_lastAction, style: const TextStyle(color: Colors.white70))),
-                ],
+              Text(
+                _lastAction,
+                style: const TextStyle(
+                  color: _secondaryText,
+                  fontSize: 15,
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          onPressed: () => _fetchStatusAndUpdate(reportErrors: true),
-          icon: const Icon(Icons.refresh_rounded),
-          label: const Text('Cập nhật trạng thái'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _cyan,
-            side: BorderSide(color: _cyan.withValues(alpha: 0.6)),
-            padding: const EdgeInsets.symmetric(vertical: 13),
+        const SizedBox(height: 16),
+        _refreshButton(),
+      ],
+    );
+  }
+
+  Widget _refreshButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: OutlinedButton.icon(
+        onPressed: () => _fetchDashboard(reportErrors: true),
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text(
+          'Cập nhật trạng thái',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
           ),
         ),
-      ],
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _cyan,
+          side: BorderSide(
+            color: _cyan.withValues(alpha: 0.55),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
     );
   }
 
@@ -758,18 +1037,30 @@ class _HomePageState extends State<HomePage> {
           children: [
             IconButton(
               onPressed: () => setState(() => _selectedTab = 0),
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
-              tooltip: 'Quay lại',
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: Colors.white,
+              ),
             ),
             const Expanded(
               child: Center(
-                child: Text('Cài đặt', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                child: Text(
+                  'Cài đặt',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
             IconButton(
               onPressed: () => setState(() => _selectedTab = 0),
-              icon: const Icon(Icons.home_outlined, color: _cyan, size: 27),
-              tooltip: 'Trang chủ',
+              icon: const Icon(
+                Icons.home_outlined,
+                color: _cyan,
+                size: 28,
+              ),
             ),
           ],
         ),
@@ -782,58 +1073,104 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.wifi_rounded, color: _cyan, size: 40),
-                  SizedBox(width: 16),
+                  Icon(
+                    Icons.wifi_rounded,
+                    color: _cyan,
+                    size: 38,
+                  ),
+                  SizedBox(width: 14),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Địa chỉ backend', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        SizedBox(height: 4),
-                        Text(
-                          'Nhập địa chỉ máy tính chạy VietHome-AI API',
-                          style: TextStyle(fontSize: 12, color: Colors.white70),
-                        ),
-                      ],
+                    child: Text(
+                      'Địa chỉ backend',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              const Text(
+                'Nhập địa chỉ IP Raspberry Pi để điều khiển thiết bị.',
+                style: TextStyle(
+                  color: _secondaryText,
+                  fontSize: 13,
+                ),
+              ),
               const SizedBox(height: 20),
-              TextField(
-                controller: _serverAddressController,
-                keyboardType: TextInputType.url,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-                decoration: InputDecoration(
-                  hintText: 'http://127.0.0.1:8000',
-                  hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
-                  filled: true,
-                  fillColor: const Color(0x990A1530),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.17)),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: TextField(
+                  controller: _serverController,
+                  maxLines: 1,
+                  expands: false,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.done,
+                  cursorColor: _cyan,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: _cyan, width: 1.3),
+                  decoration: InputDecoration(
+                    hintText: 'http://192.168.1.100:8000',
+                    hintStyle: const TextStyle(
+                      color: Color(0xFF8494AD),
+                      fontSize: 14,
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFF101E35),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 15,
+                      vertical: 15,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF344867),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: _cyan,
+                        width: 1.5,
+                      ),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 18),
               SizedBox(
-                width: double.infinity,
                 height: 52,
+                width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _isSavingServer ? null : _saveServerAddress,
-                  icon: _isSavingServer
-                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.save_rounded, size: 22),
-                  label: const Text('Lưu', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  onPressed: _savingServer ? null : _saveServer,
+                  icon: _savingServer
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_rounded),
+                  label: const Text(
+                    'Lưu',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   style: FilledButton.styleFrom(
-                    backgroundColor: _blueActive,
+                    backgroundColor: _blue,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
                   ),
                 ),
               ),
@@ -843,26 +1180,26 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 18),
         _GlassPanel(
           padding: const EdgeInsets.all(18),
-          borderRadius: 24,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.info_rounded, color: _cyan, size: 26),
-                  SizedBox(width: 12),
-                  Text('Thông tin ứng dụng', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ],
+              const Text(
+                'Thông tin ứng dụng',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 16),
               _infoRow('Phiên bản', 'v1.0.0'),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _infoRow('Nhà phát triển', 'Smart Home Team'),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               _infoRow(
                 'Trạng thái kết nối',
                 _serverConnected ? 'Online' : 'Offline',
-                valueColor: _serverConnected ? _greenOnline : Colors.orangeAccent,
+                color: _serverConnected ? _green : Colors.orangeAccent,
               ),
             ],
           ),
@@ -870,35 +1207,44 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 18),
         _GlassPanel(
           padding: const EdgeInsets.all(18),
-          borderRadius: 24,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.help_rounded, color: _cyan, size: 26),
-                  SizedBox(width: 12),
-                  Text('Hỗ trợ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ],
+              const Text(
+                'Hỗ trợ',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 12),
-              _supportRow('Hướng dẫn sử dụng', _showHelpDialog),
-              _supportRow('Liên hệ', _showContactDialog),
+              _supportRow(
+                'Hướng dẫn sử dụng',
+                _showHelpDialog,
+              ),
+              _supportRow(
+                'Liên hệ',
+                _showContactDialog,
+              ),
             ],
           ),
         ),
         if (!kIsWeb) ...[
           const SizedBox(height: 22),
           SizedBox(
-            height: 52,
+            height: 50,
             child: OutlinedButton.icon(
               onPressed: SystemNavigator.pop,
-              icon: const Icon(Icons.logout_rounded, color: Color(0xFFFF696F)),
-              label: const Text('Thoát ứng dụng', style: TextStyle(color: Color(0xFFFF696F), fontSize: 16)),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0x886A344A)),
-                backgroundColor: const Color(0x332F1728),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              icon: const Icon(
+                Icons.logout_rounded,
+                color: Color(0xFFFF696F),
+              ),
+              label: const Text(
+                'Thoát ứng dụng',
+                style: TextStyle(
+                  color: Color(0xFFFF696F),
+                ),
               ),
             ),
           ),
@@ -907,47 +1253,91 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _supportRow(String title, VoidCallback onTap) {
+  Widget _infoRow(
+    String label,
+    String value, {
+    Color? color,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _secondaryText,
+            fontSize: 13,
+          ),
+        ),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: color ?? Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _supportRow(
+    String label,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
-            Expanded(child: Text(title, style: const TextStyle(fontSize: 14, color: Colors.white))),
-            const Icon(Icons.chevron_right_rounded, color: Colors.white54, size: 24),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: _secondaryText,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _infoRow(String label, String value, {Color? valueColor}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-        Text(value, style: TextStyle(color: valueColor ?? Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
-
   void _showHelpDialog() {
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF172746),
-        title: const Text('Hướng dẫn sử dụng'),
-        content: const Text(
-          '1. Kết nối điện thoại và máy tính cùng mạng Wi-Fi.\n'
-          '2. Chạy VietHome-AI API trên máy tính.\n'
-          '3. Nhập địa chỉ máy tính và cổng backend (mặc định 8000) trong Cài đặt.\n'
-          '4. Nhấn Lưu, sau đó sử dụng các nút trên trang tổng quan để điều khiển thiết bị.\n'
-          'Điều khiển giọng nói chưa khả dụng trong giai đoạn này.',
-          style: TextStyle(height: 1.5),
+        title: const Text(
+          'Hướng dẫn sử dụng',
+          style: TextStyle(color: Colors.white),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Đóng'))],
+        content: const Text(
+          '1. Kết nối điện thoại với mạng có thể truy cập Raspberry Pi.\n'
+          '2. Chạy backend FastAPI trên Raspberry Pi.\n'
+          '3. Nhập địa chỉ IP và cổng 8000 trong Cài đặt.\n'
+          '4. Nhấn Lưu và điều khiển thiết bị.',
+          style: TextStyle(
+            color: Colors.white,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Đóng'),
+          ),
+        ],
       ),
     );
   }
@@ -955,11 +1345,23 @@ class _HomePageState extends State<HomePage> {
   void _showContactDialog() {
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF172746),
-        title: const Text('Liên hệ'),
-        content: const Text('Smart Home Team\nỨng dụng điều khiển nhà thông minh trong mạng nội bộ.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Đóng'))],
+        title: const Text(
+          'Liên hệ',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Smart Home Team\n'
+          'Ứng dụng điều khiển nhà thông minh trong mạng nội bộ.',
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Đóng'),
+          ),
+        ],
       ),
     );
   }
@@ -967,11 +1369,16 @@ class _HomePageState extends State<HomePage> {
 
 class _SensorItem extends StatelessWidget {
   final IconData icon;
-  final Color iconColor;
+  final Color color;
   final String value;
   final String label;
 
-  const _SensorItem({required this.icon, required this.iconColor, required this.value, required this.label});
+  const _SensorItem({
+    required this.icon,
+    required this.color,
+    required this.value,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -980,18 +1387,30 @@ class _SensorItem extends StatelessWidget {
       children: [
         Icon(
           icon,
-          color: iconColor,
-          size: 34,
-          shadows: [Shadow(color: iconColor.withValues(alpha: 0.6), blurRadius: 10)],
+          size: 32,
+          color: color,
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 5),
         Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white)),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFFB9C5D8),
+                fontSize: 11,
+              ),
+            ),
           ],
         ),
       ],
@@ -1005,7 +1424,12 @@ class _StatCard extends StatelessWidget {
   final String value;
   final Color color;
 
-  const _StatCard({required this.icon, required this.label, required this.value, required this.color});
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1013,11 +1437,25 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 27),
-          const SizedBox(height: 13),
-          Text(value, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Icon(icon, color: color, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFFB9C5D8),
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -1045,7 +1483,7 @@ class SmartDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _GlassPanel(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
       borderRadius: 20,
       active: isActive,
       child: Column(
@@ -1055,13 +1493,19 @@ class SmartDeviceCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon luôn giữ màu riêng của thiết bị, chỉ phát sáng khi đang bật.
               Icon(
                 icon,
                 color: activeColor,
-                size: 36,
+                size: 49,
                 shadows: isActive
-                    ? [Shadow(color: activeColor.withValues(alpha: 0.8), blurRadius: 14)]
+                    ? [
+                        Shadow(
+                          color: activeColor.withValues(
+                            alpha: 0.75,
+                          ),
+                          blurRadius: 15,
+                        ),
+                      ]
                     : null,
               ),
               Transform.scale(
@@ -1079,22 +1523,35 @@ class SmartDeviceCard extends StatelessWidget {
           const Spacer(),
           Text(
             name,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              height: 1.2,
+              fontWeight: FontWeight.bold,
+            ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 5),
           Row(
             children: [
               Expanded(
                 child: Text(
                   room,
-                  style: const TextStyle(fontSize: 12, color: Colors.white70),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFFB9C5D8),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
-              const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 13),
+              const Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white60,
+                size: 14,
+              ),
             ],
           ),
         ],
@@ -1103,8 +1560,8 @@ class SmartDeviceCard extends StatelessWidget {
   }
 }
 
-class _AbstractDarkBackground extends StatelessWidget {
-  const _AbstractDarkBackground();
+class _DarkBackground extends StatelessWidget {
+  const _DarkBackground();
 
   @override
   Widget build(BuildContext context) {
@@ -1121,7 +1578,10 @@ class _AbstractDarkBackground extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [const Color(0xFF00E5FF).withValues(alpha: 0.15), Colors.transparent],
+                  colors: [
+                    const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                    Colors.transparent,
+                  ],
                 ),
               ),
             ),
@@ -1135,7 +1595,10 @@ class _AbstractDarkBackground extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [const Color(0xFF1E88E5).withValues(alpha: 0.15), Colors.transparent],
+                  colors: [
+                    const Color(0xFF1E88E5).withValues(alpha: 0.15),
+                    Colors.transparent,
+                  ],
                 ),
               ),
             ),
@@ -1164,15 +1627,21 @@ class _GlassPanel extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        filter: ImageFilter.blur(
+          sigmaX: 15,
+          sigmaY: 15,
+        ),
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: active ? const Color(0xFF19325B).withValues(alpha: 0.6) : const Color(0xFF111C33).withValues(alpha: 0.6),
+            color: active
+                ? const Color(0xFF19325B).withValues(alpha: 0.6)
+                : const Color(0xFF111C33).withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(borderRadius),
             border: Border.all(
-              color: active ? const Color(0xFF1E88E5).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.08),
-              width: 1,
+              color: active
+                  ? const Color(0xFF1E88E5).withValues(alpha: 0.5)
+                  : Colors.white.withValues(alpha: 0.08),
             ),
             boxShadow: [
               BoxShadow(
