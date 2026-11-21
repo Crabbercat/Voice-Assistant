@@ -3,17 +3,16 @@ import logging
 import threading
 import time
 
+from dht_pi import Sensor, DHT11
 from app.core.config import settings
 from app.devices.base import BaseDevice
 
 logger = logging.getLogger(__name__)
 
-# GPIO theo chuẩn BCM
 DHT_PIN = 4
 LED_PIN = 18
-BED_LED_PIN = 22  
+BED_LED_PIN = 22
 
-# Dữ liệu cảm biến
 _sensor_lock = threading.Lock()
 _dht = None
 _last_read_time = None
@@ -21,7 +20,7 @@ _last_success_time = None
 _temperature = None
 _humidity = None
 
-READ_INTERVAL = 2.5
+READ_INTERVAL = 3.0
 MAX_DATA_AGE = 15.0
 
 
@@ -36,7 +35,6 @@ class MockDevice(BaseDevice):
 
         self._led = None
 
-        # Anh xa ten thiet bi voi chan GPIO
         led_pins = {
             "light": LED_PIN,
             "light_bed": BED_LED_PIN,
@@ -56,11 +54,10 @@ class MockDevice(BaseDevice):
             self.is_on = self._led.is_lit
 
             logger.info(
-                "Khoi tao %s tai GPIO%d",
+                "Initialized %s on GPIO%d",
                 device_id,
                 pin
             )
-
 
     def turn_on(self) -> None:
         if self._led is not None:
@@ -84,15 +81,6 @@ class MockDevice(BaseDevice):
 
 
 def read_temperature_humidity():
-    """
-    Doc DHT11 tai GPIO4.
-
-    Tra ve:
-        (temperature, humidity)
-
-    Trong che do mock:
-        (None, None)
-    """
     global _dht
     global _last_read_time
     global _last_success_time
@@ -105,7 +93,6 @@ def read_temperature_humidity():
     with _sensor_lock:
         now = time.monotonic()
 
-        # Không đọc DHT11 liên tục
         if (
             _last_read_time is not None
             and now - _last_read_time < READ_INTERVAL
@@ -115,45 +102,44 @@ def read_temperature_humidity():
         _last_read_time = now
 
         try:
-            # Chỉ khởi tạo một lần
             if _dht is None:
-                import board
-                import adafruit_dht
-
-                _dht = adafruit_dht.DHT11(
-                    board.D4,
-                    use_pulseio=False
-                )
+                _dht = Sensor(DHT11, DHT_PIN)
 
                 logger.info(
-                    "DHT11 khoi tao tai GPIO%d",
+                    "DHT11 initialized on GPIO%d",
                     DHT_PIN
                 )
 
-            temperature = _dht.temperature
-            humidity = _dht.humidity
+            reading = _dht.read()
+
+            if reading is None:
+                logger.warning("DHT11 read failed")
+                return _get_cached_sensor(now)
+
+            temperature = reading.temperature
+            humidity = reading.humidity
 
             if temperature is None or humidity is None:
-                raise RuntimeError(
-                    "DHT11 chua tra ve du lieu"
-                )
+                logger.warning("DHT11 returned no data")
+                return _get_cached_sensor(now)
 
             _temperature = float(temperature)
             _humidity = float(humidity)
-            _last_success_time = now
+            _last_success_time = time.monotonic()
 
-        except RuntimeError as error:
-            # DHT11 thường có lỗi đọc tạm thời
-            logger.warning("DHT11: %s", error)
+            logger.info(
+                "Temperature: %.1f C | Humidity: %.1f %%",
+                _temperature,
+                _humidity
+            )
 
         except Exception:
-            logger.exception("Loi doc cam bien DHT11")
+            logger.exception("DHT11 sensor error")
 
-        return _get_cached_sensor(now)
+        return _get_cached_sensor(time.monotonic())
 
 
 def _get_cached_sensor(now):
-    # Không hiển thị số đo quá cũ
     if (
         _last_success_time is None
         or now - _last_success_time > MAX_DATA_AGE
