@@ -85,7 +85,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
 
     _statusTimer ??= Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 1),
       (_) => _fetchDashboard(),
     );
   }
