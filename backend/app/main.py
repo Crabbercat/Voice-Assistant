@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.core.config import settings
 
+from app.api.fan_routes import router as fan_router
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -20,6 +22,7 @@ app = FastAPI(
     description="AI-powered Vietnamese Voice-Controlled Smart Home",
     lifespan=lifespan,
 )
+app.include_router(fan_router)
 
 app.add_middleware(
     CORSMiddleware,
