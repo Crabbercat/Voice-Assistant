@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,15 +8,35 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.api.voice_routes import router as voice_router
 from app.core.config import settings
+from app.services.voice_service import (
+    VoiceServiceUnavailableError,
+    voice_service,
+)
 
 from app.api.fan_routes import router as fan_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    print(f"Starting {settings.APP_NAME}...")
-    yield
-    print(f"Stopping {settings.APP_NAME}...")
+    logger.info("Starting %s", settings.APP_NAME)
+    if settings.VOICE_AUTO_START and settings.VOICE_ENABLED:
+        try:
+            await asyncio.to_thread(voice_service.start)
+        except VoiceServiceUnavailableError:
+            logger.exception("Voice listener auto-start failed")
+    elif settings.VOICE_AUTO_START:
+        logger.warning("VOICE_AUTO_START is true but VOICE_ENABLED is false")
+
+    try:
+        yield
+    finally:
+        try:
+            await asyncio.to_thread(voice_service.stop)
+        except VoiceServiceUnavailableError:
+            logger.exception("Voice listener did not stop cleanly")
+        logger.info("Stopping %s", settings.APP_NAME)
 
 
 app = FastAPI(

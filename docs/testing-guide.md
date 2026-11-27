@@ -1,6 +1,6 @@
 # Hướng dẫn kiểm thử VietHome AI
 
-Hướng dẫn này chạy backend với thiết bị giả lập, kiểm tra API điều khiển, Flutter Web và luồng AI text-to-device. Không cần Raspberry Pi hay phần cứng.
+Hướng dẫn này chạy backend với thiết bị giả lập, kiểm tra API điều khiển, Flutter Web và luồng AI text-to-device. Không cần Raspberry Pi hay phần cứng. Hướng dẫn demo toàn hệ thống gồm STT WAV và microphone listener nằm tại [demo.md](./demo.md).
 
 ## 1. Chuẩn bị môi trường
 
@@ -125,6 +125,30 @@ Invoke-RestMethod `
 ```
 
 Endpoint trả về transcript và bản preview của text command. STT không tự thực thi lệnh; cần gửi kết quả qua luồng preview/xác nhận. Kiểm thử tự động dùng model giả để không tải model, không cần microphone và không tác động thiết bị.
+
+### Kiểm thử microphone listener tích hợp backend (tùy chọn)
+
+Listener dùng microphone thật và cần cài thêm dependencies:
+
+```powershell
+pip install -r backend\requirements\voice.txt
+```
+
+Trong `backend\.env`, giữ `MOCK_HARDWARE=true`, đặt `VOICE_ENABLED=true` và `VOICE_AUTO_EXECUTE=false`, rồi khởi động lại backend. Trên máy có microphone, chạy:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/voice/status
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/voice/start
+```
+
+Nói “Hey Berry”, sau đó “Turn on the living room light”. Xem transcript và kết quả preview:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/voice/history?limit=10" |
+  ConvertTo-Json -Depth 6
+```
+
+Mặc định lệnh không được thực thi. Muốn thử end-to-end tới `DeviceService`, chỉ bật `VOICE_AUTO_EXECUTE=true` khi `MOCK_HARDWARE=true`. Dừng listener bằng `POST /api/voice/stop`. Test tự động không cần microphone; chúng dùng fake capture và model. Hướng dẫn cài đặt/chẩn đoán chi tiết xem [demo.md](./demo.md).
 
 ### Kiểm tra Wake Word từ file âm thanh
 

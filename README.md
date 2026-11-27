@@ -197,4 +197,6 @@ Invoke-RestMethod `
   -Body $executeBody
 ```
 
-`Turn on the light` is rejected because multiple lights are available; `Don't turn on the light` is rejected due to negation. English is the default STT language and command vocabulary; Vietnamese command aliases remain available for backward compatibility. The current command catalogue is returned by `GET /api/voice/commands`. After installing `stt.txt`, send an English WAV using `Content-Type: audio/wav` to `POST /api/voice/transcribe`; the endpoint returns a transcript and preview without executing it. The `tiny` model is downloaded on first STT use and reused in the process. Wake Word listening is not integrated into the backend service.
+`Turn on the light` is rejected because multiple lights are available; `Don't turn on the light` is rejected due to negation. English is the default STT language and command vocabulary; Vietnamese command aliases remain available for backward compatibility. The current command catalogue is returned by `GET /api/voice/commands`. After installing `stt.txt`, send an English WAV using `Content-Type: audio/wav` to `POST /api/voice/transcribe`; the endpoint returns a transcript and preview without executing it. The `tiny` model is loaded once when STT or the microphone listener first starts, then reused in the process.
+
+For the full text, WAV, Wake Word, and microphone-listener walkthrough, see [docs/demo.md](docs/demo.md). The optional backend listener is enabled explicitly through its API and needs the `voice.txt` dependencies in addition to Faster-Whisper.

@@ -1,7 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException
-from fastapi import Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.ai.command.processor import CatalogueConfigurationError
 from app.ai.speech.speech_recognizer import (
@@ -9,7 +8,11 @@ from app.ai.speech.speech_recognizer import (
     SpeechRecognitionUnavailableError,
 )
 from app.schemas.voice import CommandRequest, CommandResponse
-from app.services.voice_service import voice_service
+from app.services.voice_service import (
+    VoiceServiceDisabledError,
+    VoiceServiceUnavailableError,
+    voice_service,
+)
 
 router = APIRouter(prefix="/api/voice", tags=["AI command demo"])
 _MAX_WAV_BYTES = 10 * 1024 * 1024
@@ -23,10 +26,44 @@ async def get_commands() -> list[dict[str, object]]:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
+@router.get("/status")
+async def get_voice_status() -> dict[str, object]:
+    return voice_service.get_status()
+
+
+@router.post("/start")
+async def start_voice_listener() -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(voice_service.start)
+    except VoiceServiceDisabledError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except VoiceServiceUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@router.post("/stop")
+async def stop_voice_listener() -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(voice_service.stop)
+    except VoiceServiceUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@router.get("/history")
+async def get_voice_history(
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict[str, object]]:
+    return voice_service.get_history(limit)
+
+
 @router.post("/process", response_model=CommandResponse)
 async def process_command(request: CommandRequest) -> dict[str, object]:
     try:
-        return voice_service.process(request.text, execute=request.execute)
+        return await asyncio.to_thread(
+            voice_service.process,
+            request.text,
+            execute=request.execute,
+        )
     except CatalogueConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
