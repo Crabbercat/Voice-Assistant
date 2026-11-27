@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
+from app.api.voice_routes import router as voice_router
 from app.core.config import settings
 
 from app.api.fan_routes import router as fan_router
@@ -44,4 +45,5 @@ async def health_check() -> dict[str, str]:
 
 
 app.include_router(router)
+app.include_router(voice_router)
 

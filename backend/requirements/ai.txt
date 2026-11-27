@@ -1,0 +1,2 @@
+-r base.txt
+rapidfuzz>=3.9,<4.0

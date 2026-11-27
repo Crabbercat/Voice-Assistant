@@ -8,6 +8,8 @@ void main() {
 
     expect(find.text('Smart Home'), findsOneWidget);
     expect(find.text('Thiết bị trong nhà'), findsOneWidget);
+    expect(find.text('Điều khiển bằng câu lệnh'), findsOneWidget);
+    expect(find.byKey(const ValueKey('text-command-input')), findsOneWidget);
 
     // Dispose the page so its periodic status timer is cancelled.
     await tester.pumpWidget(const SizedBox.shrink());

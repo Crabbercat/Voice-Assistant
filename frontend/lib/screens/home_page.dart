@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:viethome_frontend/models/dashboard_snapshot.dart';
 import 'package:viethome_frontend/models/smart_device.dart';
+import 'package:viethome_frontend/models/voice_command_result.dart';
 import 'package:viethome_frontend/services/home_api.dart';
 
 import '../widgets/fan_blades_icon.dart';
@@ -32,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   final HomeApi _homeApi = HomeApi();
   final TextEditingController _serverController =
       TextEditingController(text: _defaultUrl);
+  final TextEditingController _commandController = TextEditingController();
 
   String _backendBaseUrl = _defaultUrl;
   String _lastAction = 'Chưa có thao tác';
@@ -39,6 +41,7 @@ class _HomePageState extends State<HomePage> {
   bool _serverConnected = false;
   bool _savingServer = false;
   bool _readingDashboard = false;
+  bool _processingCommand = false;
 
   int _failedRequests = 0;
   int _selectedTab = 0;
@@ -49,6 +52,7 @@ class _HomePageState extends State<HomePage> {
   double? _humidity;
 
   List<SmartDevice> _devices = [];
+  VoiceCommandResult? _voiceCommandResult;
 
   final List<String> _history = [];
   final Set<String> _pendingDevices = {};
@@ -64,6 +68,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _statusTimer?.cancel();
     _serverController.dispose();
+    _commandController.dispose();
     _homeApi.close();
     super.dispose();
   }
@@ -307,6 +312,65 @@ class _HomePageState extends State<HomePage> {
         content: Text(message),
       ),
     );
+  }
+
+  Future<void> _processTextCommand({required bool execute}) async {
+    final text = _commandController.text.trim();
+    if (text.isEmpty || !_serverConnected || _processingCommand) {
+      return;
+    }
+
+    setState(() {
+      _processingCommand = true;
+      _voiceCommandResult = null;
+    });
+
+    try {
+      final result = await _homeApi.processTextCommand(
+        baseUrl: _backendBaseUrl,
+        text: text,
+        execute: execute,
+      );
+      if (!mounted) return;
+      setState(() => _voiceCommandResult = result);
+      if (result.executionStatus == 'succeeded') {
+        await _fetchDashboard();
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage('Không xử lý được câu lệnh: $error', isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingCommand = false);
+      }
+    }
+  }
+
+  Future<void> _confirmTextCommand() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xác nhận điều khiển'),
+        content: Text(
+          'Thực thi "${_voiceCommandResult?.recognizedText ?? ''}" '
+          'trên thiết bị ${_voiceCommandResult?.deviceId ?? ''}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Thực thi'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _processTextCommand(execute: true);
+    }
   }
 
   String _formatValue(
@@ -683,43 +747,132 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildVoicePanel() {
-    return const _GlassPanel(
-      padding: EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 18,
-      ),
+    final result = _voiceCommandResult;
+    return _GlassPanel(
+      padding: const EdgeInsets.all(16),
       borderRadius: 22,
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.mic_off_rounded,
-            color: Colors.white54,
-            size: 32,
+          const Row(
+            children: [
+              Icon(Icons.auto_awesome, color: _cyan, size: 25),
+              SizedBox(width: 10),
+              Text(
+                'Điều khiển bằng câu lệnh',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
-          SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Điều khiển giọng nói chưa khả dụng',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 5),
-                Text(
-                  'STT/TTS chưa được triển khai.',
-                  style: TextStyle(
-                    color: _secondaryText,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 8),
+          const Text(
+            'Nhập câu lệnh tiếng Việt. Hệ thống sẽ phân tích trước khi thực thi.',
+            style: TextStyle(color: _secondaryText, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('text-command-input'),
+            controller: _commandController,
+            enabled: _serverConnected && !_processingCommand,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _processTextCommand(execute: false),
+            decoration: InputDecoration(
+              hintText: 'Ví dụ: Bật đèn phòng khách',
+              hintStyle: const TextStyle(color: Colors.white54),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.06),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+            ),
+            style: const TextStyle(color: Colors.white),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _serverConnected && !_processingCommand
+                  ? () => _processTextCommand(execute: false)
+                  : null,
+              icon: _processingCommand
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.search_rounded),
+              label: Text(
+                  _processingCommand ? 'Đang phân tích…' : 'Phân tích lệnh'),
             ),
           ),
+          if (result != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: result.accepted
+                    ? _green.withValues(alpha: 0.08)
+                    : Colors.redAccent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: result.accepted ? _green : Colors.redAccent,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    result.message,
+                    style: TextStyle(
+                      color: result.accepted ? _green : Colors.redAccent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (result.intent != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Intent: ${result.intent} · ${result.action} · '
+                      '${result.deviceId}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (result.confidence != null)
+                      Text(
+                        'Độ khớp: ${result.confidence!.toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: _secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+            if (result.accepted &&
+                result.executionStatus == 'needs_confirmation') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _processingCommand ? null : _confirmTextCommand,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Xác nhận thực thi'),
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );

@@ -2,7 +2,6 @@
 import atexit
 import threading
 
-from gpiozero import DigitalOutputDevice, PWMOutputDevice
 from app.devices.base import BaseDevice
 
 ENB_PIN = 25
@@ -27,6 +26,8 @@ class L298NFan(BaseDevice):
         room="Bedroom",
     ):
         super().__init__(device_id, name, room)
+
+        from gpiozero import DigitalOutputDevice, PWMOutputDevice
 
         self._lock = threading.RLock()
 

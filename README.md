@@ -23,6 +23,18 @@ python -m venv .venv
 pip install -r backend\requirements\development.txt
 ```
 
+Để chạy thử bộ xử lý câu lệnh AI (RapidFuzz, không cần microphone/model STT):
+
+```powershell
+pip install -r backend\requirements\ai.txt
+```
+
+Để bật endpoint nhận dạng WAV bằng Faster-Whisper (model `tiny` được tải và cache khi gọi lần đầu):
+
+```powershell
+pip install -r backend\requirements\stt.txt
+```
+
 ### 2. Tạo file cấu hình từ mẫu
 
 Backend đọc cấu hình từ `backend\.env`. Tạo file này từ mẫu:
@@ -83,6 +95,8 @@ Lưu ý: backend hiện chỉ cho phép CORS từ `localhost:5173` và `127.0.0.
 ## Chạy backend trên Raspberry Pi
 
 Hướng dẫn này dùng Raspberry Pi OS 64-bit. Raspberry Pi và thiết bị truy cập cần kết nối cùng mạng Wi-Fi/LAN.
+
+Để cài đặt đầy đủ, kiểm thử API/UI, thử STT và xem các cảnh báo trước khi bật GPIO thật, làm theo [hướng dẫn setup và kiểm thử Raspberry Pi](docs/raspberry-pi-setup-testing.md).
 
 ### 1. Cài công cụ cần thiết
 
@@ -152,6 +166,35 @@ Chỉ cho phép truy cập backend trong mạng tin cậy; không mở cổng `8
 
 ## Kiểm thử
 
+Xem [hướng dẫn kiểm thử frontend và backend](docs/testing-guide.md) để chạy suite tự động và thử demo text-to-device.
+
 ```powershell
 pytest backend\tests
 ```
+
+### Demo AI bằng câu lệnh tiếng Việt
+
+Backend dùng `MockDevice` mặc định (`MOCK_HARDWARE=true`). Cài dependencies AI ở trên, khởi động lại backend, sau đó gửi lệnh phân tích trước:
+
+```powershell
+$previewBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Bật đèn phòng khách"}')
+$preview = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/voice/process `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $previewBody
+$preview
+```
+
+Kết quả preview có intent, thiết bị, độ tin cậy và `execution_status=needs_confirmation`; không thiết bị nào bị điều khiển. Chỉ gửi lại với `execute=true` sau khi người dùng xác nhận:
+
+```powershell
+$executeBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Bật đèn phòng khách","execute":true}')
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/voice/process `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $executeBody
+```
+
+`Bật đèn` bị từ chối vì có nhiều đèn; `Không bật đèn` bị từ chối do phủ định. Danh mục lệnh và alias hiện tại được trả về tại `GET /api/voice/commands`. Khi cài `stt.txt`, gửi WAV bằng `Content-Type: audio/wav` tới `POST /api/voice/transcribe`; endpoint trả transcript và bản preview, không tự thực thi. Model `tiny` chỉ tải khi gọi STT lần đầu và được dùng lại trong process. Wake word chưa triển khai.

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,13 @@ class Settings(BaseSettings):
     AUDIO_CHANNELS: int = 1
     DATABASE_URL: str = "sqlite+aiosqlite:///./viethome.db"
     API_PREFIX: str = "/api/v1"
+    COMMAND_SIMILARITY_THRESHOLD: float = Field(default=80, ge=0, le=100)
+    STT_MODEL: str = "tiny"
+    STT_DEVICE: str = "cpu"
+    STT_COMPUTE_TYPE: str = "int8"
+    STT_LANGUAGE: str = "vi"
+    STT_BEAM_SIZE: int = Field(default=1, ge=1, le=5)
+    STT_MODEL_CACHE_DIR: str = "models/whisper"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[2] / ".env",

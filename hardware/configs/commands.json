@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "device_types": {
+    "light": ["den", "bong den"],
+    "fan": ["quat", "quat gio"]
+  },
+  "targets": {
+    "living_room": ["phong khach", "phong sinh hoat chung"],
+    "bedroom": ["phong ngu"]
+  },
+  "commands": [
+    {
+      "id": "light_on",
+      "intent": "LIGHT_ON",
+      "action": "turn_on",
+      "device_type": "light",
+      "enabled": true,
+      "aliases": ["bat den", "mo den", "bat bong den", "mo bong den", "bat den len"]
+    },
+    {
+      "id": "light_off",
+      "intent": "LIGHT_OFF",
+      "action": "turn_off",
+      "device_type": "light",
+      "enabled": true,
+      "aliases": ["tat den", "ngat den", "tat bong den"]
+    },
+    {
+      "id": "fan_on",
+      "intent": "FAN_ON",
+      "action": "turn_on",
+      "device_type": "fan",
+      "enabled": true,
+      "aliases": ["bat quat", "mo quat", "bat quat gio"]
+    },
+    {
+      "id": "fan_off",
+      "intent": "FAN_OFF",
+      "action": "turn_off",
+      "device_type": "fan",
+      "enabled": true,
+      "aliases": ["tat quat", "ngat quat"]
+    }
+  ]
+}

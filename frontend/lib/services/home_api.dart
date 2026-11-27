@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/dashboard_snapshot.dart';
 import '../models/smart_device.dart';
+import '../models/voice_command_result.dart';
 
 class HomeApiException implements Exception {
   const HomeApiException(this.message);
@@ -29,7 +30,8 @@ class HomeApi {
 
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
     if (decoded is! Map<String, dynamic>) {
-      throw const HomeApiException('Dữ liệu tổng quan từ máy chủ không hợp lệ.');
+      throw const HomeApiException(
+          'Dữ liệu tổng quan từ máy chủ không hợp lệ.');
     }
     return DashboardSnapshot.fromJson(decoded);
   }
@@ -47,14 +49,41 @@ class HomeApi {
         )
         .timeout(const Duration(seconds: 5));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HomeApiException('Máy chủ không thực hiện được lệnh (${response.statusCode}).');
+      throw HomeApiException(
+          'Máy chủ không thực hiện được lệnh (${response.statusCode}).');
     }
 
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
     if (decoded is! Map<String, dynamic>) {
-      throw const HomeApiException('Phản hồi điều khiển từ máy chủ không hợp lệ.');
+      throw const HomeApiException(
+          'Phản hồi điều khiển từ máy chủ không hợp lệ.');
     }
     return SmartDevice.fromJson(decoded);
+  }
+
+  Future<VoiceCommandResult> processTextCommand({
+    required String baseUrl,
+    required String text,
+    required bool execute,
+  }) async {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/api/voice/process'),
+          headers: const {'content-type': 'application/json'},
+          body: jsonEncode({'text': text, 'execute': execute}),
+        )
+        .timeout(const Duration(seconds: 5));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HomeApiException(
+        'Máy chủ không xử lý được câu lệnh (${response.statusCode}).',
+      );
+    }
+
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    if (decoded is! Map<String, dynamic>) {
+      throw const HomeApiException('Phản hồi xử lý câu lệnh không hợp lệ.');
+    }
+    return VoiceCommandResult.fromJson(decoded);
   }
 
   void close() => _client.close();
