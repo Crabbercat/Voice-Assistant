@@ -32,6 +32,7 @@ SILENCE_DURATION = 1.2
 
 # Ngưỡng RMS tối thiểu và hệ số so với nhiễu nền
 MIN_SPEECH_THRESHOLD = 0.001
+MAX_SPEECH_THRESHOLD = 0.005
 NOISE_FLOOR_MULTIPLIER = 3.0
 
 # Giới hạn thời gian ghi một câu lệnh
@@ -111,9 +112,12 @@ def calculate_rms(audio):
 
 
 def get_speech_threshold(noise_floor):
-    """Set a minimum voice threshold relative to the measured noise floor."""
+    """Keep the adaptive voice threshold within a microphone-friendly range."""
 
-    return max(MIN_SPEECH_THRESHOLD, noise_floor * NOISE_FLOOR_MULTIPLIER)
+    return min(
+        MAX_SPEECH_THRESHOLD,
+        max(MIN_SPEECH_THRESHOLD, noise_floor * NOISE_FLOOR_MULTIPLIER),
+    )
 
 
 # =========================================================
@@ -252,6 +256,12 @@ def record_command(sample_rate):
         f"[AUDIO] Noise floor RMS={noise_floor:.4f}; "
         f"speech threshold RMS={speech_threshold:.4f}"
     )
+    if noise_floor >= speech_threshold:
+        print(
+            "[WARNING] Noise floor is at or above the speech threshold; "
+            "background noise may keep recording active. Check microphone "
+            "gain and reduce nearby noise if possible."
+        )
     print("\n[COMMAND] Say an English command...")
     print("[INFO] After speaking, remain silent for about 1-2 seconds.\n")
 

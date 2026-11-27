@@ -47,3 +47,9 @@ def test_record_command_detects_speech_below_old_fixed_threshold(monkeypatch):
 
     assert command_audio is not None
     assert any(chunk.rms == 0.002 for chunk in command_audio)
+
+
+def test_speech_threshold_stays_low_when_noise_floor_is_high(monkeypatch):
+    module = load_wake_word_test(monkeypatch)
+
+    assert module.get_speech_threshold(0.01) == 0.005

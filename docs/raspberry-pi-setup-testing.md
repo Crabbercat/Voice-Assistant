@@ -312,8 +312,10 @@ Kiểm tra kết quả trong terminal:
 1. `[AUDIO] Microphone` hiển thị đúng thiết bị và sample rate.
 2. Các dòng `[RECOGNIZED]` hiển thị RMS và transcript. RMS gần 0 hoặc transcript rỗng thường là microphone bị mute, gain quá thấp, sai input device hoặc không có tiếng nói trong lúc lấy mẫu.
 3. `[WAKE WORD] Hey Berry detected!` xác nhận wake phrase được nhận dạng.
-4. Sau hiệu chỉnh, `[AUDIO]` in nhiễu nền và ngưỡng RMS. `[LEVEL]` cho biết tín hiệu các đoạn chờ; `[RECORDING] Voice detected` xác nhận đã bắt đầu thu câu lệnh.
+4. Sau hiệu chỉnh, `[AUDIO]` in nhiễu nền và ngưỡng RMS; ngưỡng được giới hạn tối đa `0.005` để không bị tăng quá cao theo nhiễu nền. `[LEVEL]` cho biết tín hiệu các đoạn chờ; `[RECORDING] Voice detected` xác nhận đã bắt đầu thu câu lệnh.
 5. Phần `RESULT` hiển thị câu lệnh đã nhận dạng và thời gian xử lý.
+
+Nếu có cảnh báo nhiễu nền bằng hoặc cao hơn ngưỡng giọng nói, script có thể bắt đầu thu ngay và tiếp tục thu lâu hơn dự kiến. Giảm gain microphone hoặc tiếng ồn xung quanh rồi thử lại.
 
 Script giữ âm thanh từng đoạn trong bộ nhớ để nhận dạng, không ghi WAV ra đĩa. Đây chỉ là bài kiểm tra microphone/STT độc lập; kết quả không thực thi lệnh trên thiết bị. Muốn thử thực thi, nhập câu lệnh vào luồng preview/xác nhận của frontend hoặc API như mục 7.
 
