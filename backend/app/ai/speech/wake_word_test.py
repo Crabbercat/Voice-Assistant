@@ -12,7 +12,7 @@ from faster_whisper import WhisperModel
 # CONFIGURATION
 # =========================================================
 
-MODEL_SIZE = "base"       # Thử tiny trước, sau đó đổi thành base
+MODEL_SIZE = "tiny"       # Thử tiny trước, sau đó đổi thành base
 DEVICE = "cpu"
 COMPUTE_TYPE = "int8"
 
@@ -21,14 +21,18 @@ TARGET_SAMPLE_RATE = 16000
 # Mỗi lần lấy âm thanh để kiểm tra Wake Word
 WAKE_CHUNK_SECONDS = 3.0
 
+# Thời gian đo nhiễu nền trước khi nhận câu lệnh
+COMMAND_CALIBRATION_SECONDS = 1.0
+
 # Thời lượng mỗi đoạn âm thanh khi ghi câu lệnh
 COMMAND_CHUNK_SECONDS = 0.25
 
 # Thời gian im lặng để xác định người nói đã kết thúc
 SILENCE_DURATION = 1.2
 
-# Ngưỡng âm lượng để phát hiện giọng nói
-SILENCE_THRESHOLD = 0.012
+# Ngưỡng RMS tối thiểu và hệ số so với nhiễu nền
+MIN_SPEECH_THRESHOLD = 0.001
+NOISE_FLOOR_MULTIPLIER = 3.0
 
 # Giới hạn thời gian ghi một câu lệnh
 MAX_COMMAND_DURATION = 15
@@ -104,6 +108,12 @@ def calculate_rms(audio):
     """Tính mức âm lượng RMS."""
 
     return float(np.sqrt(np.mean(np.square(audio)) + 1e-10))
+
+
+def get_speech_threshold(noise_floor):
+    """Set a minimum voice threshold relative to the measured noise floor."""
+
+    return max(MIN_SPEECH_THRESHOLD, noise_floor * NOISE_FLOOR_MULTIPLIER)
 
 
 # =========================================================
@@ -230,6 +240,18 @@ def wait_for_wake_word(model, sample_rate):
 
 def record_command(sample_rate):
 
+    print("\n[AUDIO] Keep quiet while the microphone is calibrated...")
+    calibration_audio = convert_to_16khz(
+        record_audio(COMMAND_CALIBRATION_SECONDS, sample_rate),
+        sample_rate
+    )
+    noise_floor = calculate_rms(calibration_audio)
+    speech_threshold = get_speech_threshold(noise_floor)
+
+    print(
+        f"[AUDIO] Noise floor RMS={noise_floor:.4f}; "
+        f"speech threshold RMS={speech_threshold:.4f}"
+    )
     print("\n[COMMAND] Say an English command...")
     print("[INFO] After speaking, remain silent for about 1-2 seconds.\n")
 
@@ -238,6 +260,7 @@ def record_command(sample_rate):
     silence_time = 0.0
     speech_started = False
     total_duration = 0.0
+    highest_rms = 0.0
 
     while total_duration < MAX_COMMAND_DURATION:
 
@@ -252,17 +275,21 @@ def record_command(sample_rate):
         )
 
         rms = calculate_rms(audio)
+        highest_rms = max(highest_rms, rms)
 
         audio_parts.append(audio)
 
         total_duration += COMMAND_CHUNK_SECONDS
 
-        if rms >= SILENCE_THRESHOLD:
+        if rms >= speech_threshold:
+            if not speech_started:
+                print(
+                    f"[RECORDING] Voice detected "
+                    f"(RMS={rms:.4f}, threshold={speech_threshold:.4f})"
+                )
 
             speech_started = True
             silence_time = 0.0
-
-            print("[RECORDING] Đang nhận giọng nói...", end="\r")
 
         elif speech_started:
 
@@ -270,10 +297,19 @@ def record_command(sample_rate):
 
             if silence_time >= SILENCE_DURATION:
                 break
+        else:
+            print(
+                f"[LEVEL] RMS={rms:.4f} / threshold={speech_threshold:.4f}",
+                flush=True
+            )
 
     if not speech_started:
 
-        print("\n[WARNING] No speech detected.")
+        print(
+            "\n[WARNING] No speech detected "
+            f"(highest RMS={highest_rms:.4f}, "
+            f"threshold={speech_threshold:.4f})."
+        )
 
         return None
 

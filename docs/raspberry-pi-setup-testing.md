@@ -11,7 +11,7 @@ Hướng dẫn này triển khai FastAPI trên Raspberry Pi OS 64-bit / Debian 1
 - Lệnh text được chuẩn hóa, nhận diện bằng RapidFuzz và xác thực trước khi hiển thị kết quả.
 - Chỉ sau khi người dùng xác nhận, backend mới gọi `DeviceService` và registry hiện có.
 - `MOCK_HARDWARE=true` là chế độ mặc định, không tác động GPIO.
-- Faster-Whisper là tùy chọn riêng. Endpoint STT nhận tệp WAV; microphone listener và Wake Word chưa được triển khai.
+- Endpoint STT nhận tệp WAV. Có script kiểm thử microphone/Wake Word độc lập; script này không phải microphone listener của backend và không điều khiển thiết bị.
 
 ## 2. Chuẩn bị Raspberry Pi
 
@@ -69,7 +69,7 @@ python -m pip install -r backend/requirements/stt.txt
 
 Model `tiny` được tải vào `models/whisper` khi gọi STT lần đầu, sau đó được giữ trong cache và model instance được tái sử dụng trong process backend. Lần đầu cần Internet và có thể mất thời gian; nên thử trước trên Pi và theo dõi dung lượng trống/RAM.
 
-STT hiện nhận tệp WAV mono/âm thanh do Faster-Whisper giải mã qua API `POST /api/voice/transcribe`, giới hạn 10 MB. API trả transcript cùng preview lệnh, không tự thực thi. Không có dịch vụ mở microphone hoặc Wake Word trong phiên bản này.
+STT qua API nhận tệp WAV mono/âm thanh do Faster-Whisper giải mã tại `POST /api/voice/transcribe`, giới hạn 10 MB. API trả transcript cùng preview lệnh, không tự thực thi. Kiểm thử microphone trực tiếp được mô tả ở mục 10; backend không tự mở microphone hoặc chạy Wake Word.
 
 ## 4. Cấu hình demo an toàn
 
@@ -191,13 +191,13 @@ curl -sS -X POST http://127.0.0.1:8000/devices/light/state \
 
 Chạy mỗi câu với `execute:true`. Lệnh bị từ chối không được thực thi:
 
-| Câu lệnh | Kết quả dự kiến |
-|---|---|
-| `Turn off the bedroom fan` | `FAN_OFF`, `device_id: "fan"` |
-| `Turn on the light` | `AMBIGUOUS_TARGET` |
-| `Don't turn on the light` | `NEGATION_DETECTED` |
-| `Turn on the living room light or turn it off` | `AMBIGUOUS_COMMAND` |
-| `Turn on the kitchen light` | `TARGET_NOT_FOUND` |
+| Câu lệnh                                       | Kết quả dự kiến               |
+| ------------------------------------------------ | --------------------------------- |
+| `Turn off the bedroom fan`                     | `FAN_OFF`, `device_id: "fan"` |
+| `Turn on the light`                            | `AMBIGUOUS_TARGET`              |
+| `Don't turn on the light`                      | `NEGATION_DETECTED`             |
+| `Turn on the living room light or turn it off` | `AMBIGUOUS_COMMAND`             |
+| `Turn on the kitchen light`                    | `TARGET_NOT_FOUND`              |
 
 Ví dụ kiểm tra phủ định:
 
@@ -238,7 +238,7 @@ Kiểm tra trên dashboard:
 
 Nếu giao diện được mở từ một origin web khác, trình duyệt có thể chặn request do CORS. Backend hiện chỉ cho phép `http://localhost:5173` và `http://127.0.0.1:5173`. Khi đó chạy frontend ở một trong các origin được phép hoặc chủ động cập nhật danh sách CORS để thêm đúng origin tin cậy; không mở CORS cho mọi origin khi backend điều khiển thiết bị.
 
-## 9. Kiểm thử STT bằng WAV (tùy chọn)
+## 9. Kiểm thử STT bằng WAV qua API (tùy chọn)
 
 Từ một máy đã cài `backend/requirements/stt.txt`, gửi một WAV có lời nói tiếng Anh, kích thước tối đa 10 MB:
 
@@ -258,17 +258,76 @@ Phản hồi cần có `recognized_text`, ngôn ngữ và `command`. STT chỉ s
 - Lỗi model/tải xuống trả lỗi 503; kiểm tra kết nối Internet, cache `models/whisper` và log backend.
 - Đánh giá transcript bằng nhiều câu tiếng Anh trong môi trường yên tĩnh. Không xem một WAV thử nghiệm là đo chính xác độ chính xác thực tế.
 
-## 10. Cấu hình phần cứng thật — chỉ sau khi đối chiếu dây
+## 10. Kiểm thử microphone trực tiếp (script độc lập)
+
+Phần này mở microphone trên Raspberry Pi để thử Wake Word và STT mà không cần tạo file ghi âm. Script chỉ in kết quả nhận dạng ra terminal; nó **không gửi lệnh tới API, không gọi `DeviceService` và không điều khiển thiết bị**. Giữ `MOCK_HARDWARE=true`.
+
+### Kiểm tra thiết bị thu âm
+
+Trước tiên cắm microphone USB hoặc USB sound card có đầu vào microphone, rồi kiểm tra ALSA:
+
+```bash
+arecord -l
+```
+
+Phải có ít nhất một thiết bị capture. Nếu danh sách trống, Pi chưa nhận thiết bị thu âm: thử cổng USB khác, kiểm tra microphone/sound card hoặc dùng một microphone tương thích. Cài Python package sẽ không tạo ra thiết bị capture nếu phần cứng chưa được nhận diện.
+
+### Cài thư viện và xác nhận microphone
+
+Trong thư mục gốc repository, cài PortAudio và các package Python vào virtual environment:
+
+```bash
+sudo apt update
+sudo apt install -y libportaudio2 portaudio19-dev
+source .venv/bin/activate
+python -m pip install sounddevice scipy numpy
+```
+
+Cài Faster-Whisper nếu chưa cài STT:
+
+```bash
+python -m pip install -r backend/requirements/stt.txt
+```
+
+Liệt kê microphone mặc định mà `sounddevice` nhìn thấy:
+
+```bash
+python -c "import sounddevice as sd; print(sd.query_devices()); print('Default input:', sd.query_devices(kind='input'))"
+```
+
+Nếu lệnh báo không có input device, quay lại kiểm tra `arecord -l`, quyền truy cập thiết bị và kết nối microphone trước khi chạy nhận dạng.
+
+### Chạy thử Wake Word và câu lệnh
+
+Từ thư mục gốc repository, khi virtual environment đã kích hoạt:
+
+```bash
+python backend/app/ai/speech/wake_word_test.py
+```
+
+Lần đầu Faster-Whisper có thể tải model `base` vào `models/whisper`; cần kết nối Internet và đủ dung lượng trống. Sau khi hiện tên microphone và dòng `Waiting for 'Hey Berry'`, nói rõ **“Hey Berry”** bằng tiếng Anh. Khi script nhận wake word, giữ im lặng khoảng một giây để microphone đo nhiễu nền. Chỉ nói câu lệnh tiếng Anh, ví dụ **“Turn on the living room light”**, sau khi hiện `[COMMAND] Say an English command...`; rồi im lặng khoảng 1–2 giây để kết thúc câu. Nhấn `Ctrl+C` để dừng.
+
+Kiểm tra kết quả trong terminal:
+
+1. `[AUDIO] Microphone` hiển thị đúng thiết bị và sample rate.
+2. Các dòng `[RECOGNIZED]` hiển thị RMS và transcript. RMS gần 0 hoặc transcript rỗng thường là microphone bị mute, gain quá thấp, sai input device hoặc không có tiếng nói trong lúc lấy mẫu.
+3. `[WAKE WORD] Hey Berry detected!` xác nhận wake phrase được nhận dạng.
+4. Sau hiệu chỉnh, `[AUDIO]` in nhiễu nền và ngưỡng RMS. `[LEVEL]` cho biết tín hiệu các đoạn chờ; `[RECORDING] Voice detected` xác nhận đã bắt đầu thu câu lệnh.
+5. Phần `RESULT` hiển thị câu lệnh đã nhận dạng và thời gian xử lý.
+
+Script giữ âm thanh từng đoạn trong bộ nhớ để nhận dạng, không ghi WAV ra đĩa. Đây chỉ là bài kiểm tra microphone/STT độc lập; kết quả không thực thi lệnh trên thiết bị. Muốn thử thực thi, nhập câu lệnh vào luồng preview/xác nhận của frontend hoặc API như mục 7.
+
+## 11. Cấu hình phần cứng thật — chỉ sau khi đối chiếu dây
 
 Registry hiện tại có các thiết bị cố định trong code, không đọc `hardware/configs/devices.example.json` để tự cấu hình GPIO. Những chân hiện được dùng khi `MOCK_HARDWARE=false`:
 
-| Thiết bị | ID API | GPIO theo code |
-|---|---|---:|
-| Đèn phòng khách | `light` | BCM 18 |
-| Đèn ngủ | `light_bed` | BCM 22 |
-| Quạt L298N | `fan` | BCM 23, 24 và PWM BCM 25 |
-| Servo cửa | `door` | BCM 27 |
-| DHT11 (nếu driver cảm biến có sẵn) | — | BCM 4 |
+| Thiết bị                              | ID API        |            GPIO theo code |
+| --------------------------------------- | ------------- | ------------------------: |
+| Đèn phòng khách                     | `light`     |                    BCM 18 |
+| Đèn ngủ                              | `light_bed` |                    BCM 22 |
+| Quạt L298N                             | `fan`       | BCM 23, 24 và PWM BCM 25 |
+| Servo cửa                              | `door`      |                    BCM 27 |
+| DHT11 (nếu driver cảm biến có sẵn) | —            |                     BCM 4 |
 
 Các số trên là BCM GPIO numbers suy ra từ mã nguồn, không phải xác nhận sơ đồ dây. Tài liệu đấu nối trong repository hiện chưa mô tả kết nối thực tế. Trước khi bật GPIO:
 
@@ -280,7 +339,7 @@ Các số trên là BCM GPIO numbers suy ra từ mã nguồn, không phải xác
 
 Khi mock đang bật, `GET /devices/` và nút bấm chứng minh đường API/service hoạt động, nhưng không chứng minh dây, driver hay thiết bị vật lý hoạt động.
 
-## 11. Chạy backend tự khởi động bằng systemd (tùy chọn)
+## 12. Chạy backend tự khởi động bằng systemd (tùy chọn)
 
 Đầu tiên xác minh chạy backend thủ công thành công. Sau đó tạo unit:
 
@@ -320,10 +379,10 @@ sudo journalctl -u viethome-ai -n 100 --no-pager
 
 Không cấu hình nhiều Uvicorn workers. Nếu chuyển sang GPIO thật, trước tiên dừng service, xác minh tài khoản service có quyền truy cập GPIO theo cách an toàn cho OS và kiểm tra đầy đủ từng mạch.
 
-## 12. Giới hạn hiện tại cần biết
+## 13. Giới hạn hiện tại cần biết
 
-- Wake Word, microphone listener, ghi âm nền và TTS chưa có trong demo.
-- STT hoạt động qua upload WAV, không phải nghe trực tiếp từ mic.
+- Backend chưa có microphone listener nền hoặc Wake Word; script ở mục 10 chỉ dùng để kiểm thử trực tiếp và không tích hợp DeviceService.
+- Endpoint STT nhận WAV upload; script microphone độc lập không gửi transcript đến API.
 - Model STT tải lần đầu cần mạng; chưa kiểm thử benchmark CPU/RAM/thời gian trên Raspberry Pi.
 - Driver cảm biến DHT11 được import tùy điều kiện và không có trong bộ requirements cơ bản; nhiệt độ/độ ẩm có thể hiển thị `—`.
 - Cấu hình thiết bị ví dụ có thể không khớp registry và chân GPIO trong code; registry trong source hiện tại mới là hành vi thực tế.
