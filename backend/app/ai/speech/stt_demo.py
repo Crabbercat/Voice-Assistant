@@ -11,7 +11,7 @@ from scipy.signal import resample_poly
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 
-MODEL_ID = "khanhld/wav2vec2-base-vietnamese-160h"
+MODEL_ID = "facebook/wav2vec2-base-960h"
 TARGET_SAMPLE_RATE = 16000
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -73,7 +73,7 @@ def record_audio(duration: int, device=None):
 
 
 def load_model():
-    """Load the Vietnamese Wav2Vec2 model."""
+    """Load the English Wav2Vec2 model."""
     print("\nLoading STT model...")
     print(f"Model: {MODEL_ID}")
 
@@ -89,7 +89,7 @@ def load_model():
 
 
 def transcribe(audio, processor, model):
-    """Convert audio waveform into Vietnamese text."""
+    """Convert an audio waveform into English text."""
     inputs = processor(
         audio,
         sampling_rate=TARGET_SAMPLE_RATE,
@@ -111,7 +111,7 @@ def transcribe(audio, processor, model):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Vietnamese microphone STT test"
+        description="English microphone STT test"
     )
 
     parser.add_argument(

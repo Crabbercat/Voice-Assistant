@@ -770,7 +770,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Nhập câu lệnh tiếng Việt. Hệ thống sẽ phân tích trước khi thực thi.',
+            'Enter an English command. It will be analyzed before execution.',
             style: TextStyle(color: _secondaryText, fontSize: 12),
           ),
           const SizedBox(height: 12),
@@ -781,7 +781,7 @@ class _HomePageState extends State<HomePage> {
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _processTextCommand(execute: false),
             decoration: InputDecoration(
-              hintText: 'Ví dụ: Bật đèn phòng khách',
+              hintText: 'Example: Turn on the living room light',
               hintStyle: const TextStyle(color: Colors.white54),
               filled: true,
               fillColor: Colors.white.withValues(alpha: 0.06),

@@ -90,12 +90,13 @@ COMMAND_SIMILARITY_THRESHOLD=80
 STT_MODEL=tiny
 STT_DEVICE=cpu
 STT_COMPUTE_TYPE=int8
-STT_LANGUAGE=vi
+STT_LANGUAGE=en
 STT_BEAM_SIZE=1
 STT_MODEL_CACHE_DIR=models/whisper
 ```
 
 `MOCK_HARDWARE=true` phải được giữ trong quá trình kiểm tra API/UI ban đầu. Chỉ mở quyền truy cập cổng 8000 trong mạng tin cậy; không forward cổng này trực tiếp ra Internet.
+Nếu đã có `backend/.env` từ lần cài trước, hãy đổi `STT_LANGUAGE=vi` thành `STT_LANGUAGE=en`; file `.env` hiện có sẽ được ưu tiên hơn `.env.example`.
 
 ## 5. Chạy backend
 
@@ -151,7 +152,7 @@ Lệnh sau chỉ phân tích câu, tuyệt đối không đổi trạng thái th
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/voice/process \
   -H 'Content-Type: application/json' \
-  --data-raw '{"text":"Bật đèn phòng khách"}'
+  --data-raw '{"text":"Turn on the living room light"}'
 ```
 
 Kiểm tra phản hồi có:
@@ -175,7 +176,7 @@ Chỉ gửi yêu cầu này sau khi người dùng đã xác nhận preview:
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/voice/process \
   -H 'Content-Type: application/json' \
-  --data-raw '{"text":"Bật đèn phòng khách","execute":true}'
+  --data-raw '{"text":"Turn on the living room light","execute":true}'
 ```
 
 Kết quả mong đợi: `execution_status: "succeeded"` và `execution.success: true`. Gọi `GET /devices/` để xác nhận trạng thái mock của `light` đã bật. Tắt lại thiết bị sau bài thử:
@@ -192,18 +193,18 @@ Chạy mỗi câu với `execute:true`. Lệnh bị từ chối không được 
 
 | Câu lệnh | Kết quả dự kiến |
 |---|---|
-| `Tắt quạt phòng ngủ` | `FAN_OFF`, `device_id: "fan"` |
-| `Bật đèn` | `AMBIGUOUS_TARGET` |
-| `Không bật đèn` | `NEGATION_DETECTED` |
-| `Bật đèn phòng khách hay tắt đèn?` | `AMBIGUOUS_COMMAND` |
-| `Bật đèn phòng bếp` | `TARGET_NOT_FOUND` |
+| `Turn off the bedroom fan` | `FAN_OFF`, `device_id: "fan"` |
+| `Turn on the light` | `AMBIGUOUS_TARGET` |
+| `Don't turn on the light` | `NEGATION_DETECTED` |
+| `Turn on the living room light or turn it off` | `AMBIGUOUS_COMMAND` |
+| `Turn on the kitchen light` | `TARGET_NOT_FOUND` |
 
 Ví dụ kiểm tra phủ định:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/voice/process \
   -H 'Content-Type: application/json' \
-  --data-raw '{"text":"Không bật đèn","execute":true}'
+  --data-raw '{"text":"Do not turn on the light","execute":true}'
 ```
 
 Sau các lệnh bị từ chối, kiểm tra lại `/devices/` để chắc trạng thái thiết bị không bị thay đổi.
@@ -230,16 +231,16 @@ Kiểm tra trên dashboard:
 
 1. Trạng thái server hiển thị Online và danh sách bốn thiết bị tải được.
 2. Công tắc có thể bật/tắt thiết bị mock; trạng thái được làm mới từ backend.
-3. Nhập `Bật đèn phòng khách`, nhấn **Phân tích lệnh**.
+3. Nhập `Turn on the living room light`, nhấn **Phân tích lệnh**.
 4. Kiểm tra intent/thiết bị/độ khớp xuất hiện nhưng thiết bị chưa đổi trạng thái.
 5. Nhấn **Xác nhận thực thi**, xác nhận tiếp trong hộp thoại; thiết bị mới đổi trạng thái.
-6. Thử `Bật đèn` và `Không bật đèn`; giao diện hiển thị lý do từ chối, thiết bị không đổi trạng thái.
+6. Thử `Turn on the light` và `Don't turn on the light`; giao diện hiển thị lý do từ chối, thiết bị không đổi trạng thái.
 
 Nếu giao diện được mở từ một origin web khác, trình duyệt có thể chặn request do CORS. Backend hiện chỉ cho phép `http://localhost:5173` và `http://127.0.0.1:5173`. Khi đó chạy frontend ở một trong các origin được phép hoặc chủ động cập nhật danh sách CORS để thêm đúng origin tin cậy; không mở CORS cho mọi origin khi backend điều khiển thiết bị.
 
 ## 9. Kiểm thử STT bằng WAV (tùy chọn)
 
-Từ một máy đã cài `backend/requirements/stt.txt`, gửi một WAV tiếng Việt có kích thước tối đa 10 MB:
+Từ một máy đã cài `backend/requirements/stt.txt`, gửi một WAV có lời nói tiếng Anh, kích thước tối đa 10 MB:
 
 ```bash
 curl -sS -X POST http://IP_RASPBERRY_PI:8000/api/voice/transcribe \
@@ -255,7 +256,7 @@ Phản hồi cần có `recognized_text`, ngôn ngữ và `command`. STT chỉ s
 - Tệp lớn hơn 10 MB trả lỗi 413.
 - Thiếu Faster-Whisper trả lỗi dịch vụ chưa sẵn sàng; cài `stt.txt`.
 - Lỗi model/tải xuống trả lỗi 503; kiểm tra kết nối Internet, cache `models/whisper` và log backend.
-- Đánh giá transcript bằng nhiều câu tiếng Việt trong môi trường yên tĩnh. Không xem một WAV thử nghiệm là đo chính xác độ chính xác thực tế.
+- Đánh giá transcript bằng nhiều câu tiếng Anh trong môi trường yên tĩnh. Không xem một WAV thử nghiệm là đo chính xác độ chính xác thực tế.
 
 ## 10. Cấu hình phần cứng thật — chỉ sau khi đối chiếu dây
 

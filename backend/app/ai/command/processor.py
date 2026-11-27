@@ -16,10 +16,20 @@ class RapidFuzzUnavailableError(RuntimeError):
 
 class CommandProcessor:
     _ACTION_WORDS = {
-        "turn_on": {"bat", "mo"},
-        "turn_off": {"tat", "ngat"},
+        "turn_on": {"on", "activate", "enable", "start", "bat", "mo"},
+        "turn_off": {"off", "deactivate", "disable", "stop", "tat", "ngat"},
     }
-    _NEGATION_WORDS = {"khong", "dung", "chua", "khoi"}
+    _NEGATION_WORDS = {
+        "not",
+        "never",
+        "no",
+        "cannot",
+        "khong",
+        "dung",
+        "chua",
+        "khoi",
+    }
+    _ALTERNATIVE_WORDS = {"or", "either", "hay", "hoac"}
 
     def __init__(
         self,
@@ -239,7 +249,7 @@ class CommandProcessor:
         if len(actions) > 1:
             reason = (
                 "AMBIGUOUS_COMMAND"
-                if "hay" in tokens or "hoac" in tokens
+                if self._ALTERNATIVE_WORDS.intersection(tokens)
                 else "CONFLICTING_ACTION"
             )
             return self._result(text, normalized, threshold, reason)
@@ -323,7 +333,19 @@ class CommandProcessor:
                 score=round(score, 1),
             )
         target = targets[0] if targets else None
-        target_markers = {"phong", "lau", "tang", "san", "bep", "vuon"}
+        target_markers = {
+            "room",
+            "kitchen",
+            "garage",
+            "bathroom",
+            "office",
+            "phong",
+            "lau",
+            "tang",
+            "san",
+            "bep",
+            "vuon",
+        }
         if target is None and target_markers.intersection(tokens):
             return self._result(
                 text,

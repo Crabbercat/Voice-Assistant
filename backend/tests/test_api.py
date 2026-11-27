@@ -83,7 +83,7 @@ def test_text_command_preview_requires_confirmation(monkeypatch: pytest.MonkeyPa
 
     response = client.post(
         "/api/voice/process",
-        json={"text": "Bật đèn phòng khách"},
+        json={"text": "Turn on the living room light"},
     )
 
     assert response.status_code == 200
@@ -110,7 +110,7 @@ def test_text_command_executes_only_after_explicit_confirmation(
     monkeypatch.setattr(device_service, "set_device_state", track_execution)
     response = client.post(
         "/api/voice/process",
-        json={"text": "Bật đèn phòng khách", "execute": True},
+        json={"text": "Turn on the living room light", "execute": True},
     )
 
     assert response.status_code == 200
@@ -130,6 +130,11 @@ def test_text_command_executes_only_after_explicit_confirmation(
         ("Không bật đèn", "NEGATION_DETECTED"),
         ("Bật đèn phòng khách hay tắt đèn?", "AMBIGUOUS_COMMAND"),
         ("Bật đèn phòng bếp", "TARGET_NOT_FOUND"),
+        ("Turn off the bedroom fan", "MATCH_ACCEPTED"),
+        ("Turn on the light", "AMBIGUOUS_TARGET"),
+        ("Don't turn on the light", "NEGATION_DETECTED"),
+        ("Turn on the living room light or turn it off", "AMBIGUOUS_COMMAND"),
+        ("Turn on the kitchen light", "TARGET_NOT_FOUND"),
     ],
 )
 def test_text_command_validation(text: str, reason: str) -> None:
@@ -151,7 +156,7 @@ def test_transcribe_wav_returns_command_preview_without_execution(
     class FakeRecognizer:
         def transcribe(self, audio: bytes) -> dict[str, object]:
             return {
-                "recognized_text": "Bật đèn phòng khách",
+                "recognized_text": "Turn on the living room light",
                 "language": "vi",
                 "language_probability": 0.97,
                 "duration_seconds": 1.0,
@@ -176,7 +181,7 @@ def test_transcribe_wav_returns_command_preview_without_execution(
 
     assert response.status_code == 200
     result = response.json()
-    assert result["recognized_text"] == "Bật đèn phòng khách"
+    assert result["recognized_text"] == "Turn on the living room light"
     assert result["command"]["intent"] == "LIGHT_ON"
     assert result["command"]["execution_status"] == "needs_confirmation"
     assert calls == []

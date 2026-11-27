@@ -1,17 +1,18 @@
+import argparse
 import re
 import time
+from pathlib import Path
+
 import numpy as np
-import sounddevice as sd
 
 from faster_whisper import WhisperModel
-from scipy.signal import resample_poly
 
 
 # =========================================================
 # CONFIGURATION
 # =========================================================
 
-MODEL_SIZE = "tiny"       # Thử tiny trước, sau đó đổi thành base
+MODEL_SIZE = "base"       # Thử tiny trước, sau đó đổi thành base
 DEVICE = "cpu"
 COMPUTE_TYPE = "int8"
 
@@ -38,6 +39,8 @@ WAKE_WORDS = [
     "hey very",
     "hey beri",
     "hey be ri",
+    "berry",
+    "barry",
 ]
 
 
@@ -47,6 +50,8 @@ WAKE_WORDS = [
 
 def get_input_sample_rate():
     """Lấy sample rate mặc định của microphone."""
+
+    import sounddevice as sd
 
     device = sd.query_devices(kind="input")
 
@@ -60,6 +65,8 @@ def get_input_sample_rate():
 
 def record_audio(duration, sample_rate):
     """Thu âm từ microphone."""
+
+    import sounddevice as sd
 
     frames = int(duration * sample_rate)
 
@@ -80,6 +87,8 @@ def convert_to_16khz(audio, original_rate):
 
     if original_rate == TARGET_SAMPLE_RATE:
         return audio.astype(np.float32)
+
+    from scipy.signal import resample_poly
 
     gcd = np.gcd(original_rate, TARGET_SAMPLE_RATE)
 
@@ -102,7 +111,7 @@ def calculate_rms(audio):
 # =========================================================
 
 def normalize_text(text):
-    """Chuẩn hóa văn bản để kiểm tra Wake Word."""
+    """Normalize transcript text before checking wake phrases."""
 
     text = text.lower()
     text = re.sub(r"[^\w\s]", " ", text)
@@ -112,12 +121,12 @@ def normalize_text(text):
 
 
 def transcribe_audio(model, audio):
-    """Nhận dạng một đoạn âm thanh bằng Faster-Whisper."""
+    """Transcribe one audio segment with Faster-Whisper in English."""
 
     segments, info = model.transcribe(
         audio,
         task="transcribe",
-        language="vi",
+        language="en",
         beam_size=1,
         vad_filter=False,
         condition_on_previous_text=False
@@ -128,8 +137,27 @@ def transcribe_audio(model, audio):
     return text.strip()
 
 
+def test_audio_file(model, audio_path):
+    """Transcribe one audio file and report whether it contains a wake phrase."""
+
+    path = Path(audio_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {path}")
+
+    text = transcribe_audio(model, str(path.resolve()))
+    detected = bool(text and detect_wake_word(text))
+
+    print(f"[FILE] {path}")
+    print(f"[TRANSCRIPT] {text or '<empty>'}")
+    print(f"[WAKE WORD] {'Detected' if detected else 'Not detected'}")
+    if detected:
+        print("[INFO] Matched one of the configured wake-word variants.")
+
+    return detected
+
+
 def detect_wake_word(text):
-    """Kiểm tra câu nhận dạng có chứa Hey Berry không."""
+    """Check whether the transcript contains a configured wake phrase."""
 
     normalized = normalize_text(text)
 
@@ -147,14 +175,14 @@ def detect_wake_word(text):
 
 def wait_for_wake_word(model, sample_rate):
 
-    print("\n[WAKE WORD] Đang chờ 'Hey Berry'...")
-    print("[INFO] Toàn bộ kết quả nhận dạng sẽ được hiển thị.\n")
+    print("\n[WAKE WORD] Waiting for 'Hey Berry'...")
+    print("[INFO] All recognized text will be displayed.\n")
 
     recognition_count = 0
 
     while True:
 
-        # Thu âm một đoạn ngắn
+        # Record a short segment.
         raw_audio = record_audio(
             WAKE_CHUNK_SECONDS,
             sample_rate
@@ -167,8 +195,7 @@ def wait_for_wake_word(model, sample_rate):
 
         rms = calculate_rms(audio)
 
-        # Không bỏ qua âm thanh nhỏ.
-        # Vẫn đưa vào model để ghi nhận mọi kết quả có thể nhận dạng.
+        # Transcribe even quiet segments so possible matches are not skipped.
         text = transcribe_audio(model, audio)
 
         recognition_count += 1
@@ -188,10 +215,10 @@ def wait_for_wake_word(model, sample_rate):
                 flush=True
             )
 
-        # Kiểm tra Wake Word
+        # Check for a wake phrase.
         if text and detect_wake_word(text):
 
-            print("\n[WAKE WORD] Đã phát hiện Hey Berry!")
+            print("\n[WAKE WORD] Hey Berry detected!")
 
             return
 
@@ -203,8 +230,8 @@ def wait_for_wake_word(model, sample_rate):
 
 def record_command(sample_rate):
 
-    print("\n[COMMAND] Hãy nói câu lệnh...")
-    print("[INFO] Nói xong hãy giữ im lặng khoảng 1-2 giây.\n")
+    print("\n[COMMAND] Say an English command...")
+    print("[INFO] After speaking, remain silent for about 1-2 seconds.\n")
 
     audio_parts = []
 
@@ -246,13 +273,13 @@ def record_command(sample_rate):
 
     if not speech_started:
 
-        print("\n[WARNING] Không phát hiện được giọng nói.")
+        print("\n[WARNING] No speech detected.")
 
         return None
 
     command_audio = np.concatenate(audio_parts)
 
-    print("\n[COMMAND] Đã kết thúc ghi âm.")
+    print("\n[COMMAND] Recording finished.")
 
     return command_audio
 
@@ -262,15 +289,23 @@ def record_command(sample_rate):
 # =========================================================
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Test English Hey Berry wake-word detection using a microphone or audio file."
+    )
+    parser.add_argument(
+        "--file",
+        type=Path,
+        help="Transcribe an audio file offline instead of opening the microphone.",
+    )
+    args = parser.parse_args()
+    if args.file is not None and not args.file.expanduser().is_file():
+        parser.error(f"Audio file not found: {args.file}")
 
     print("=" * 55)
-    print("             VIETHOME AI - STT TEST")
+    print("         VIETHOME AI - ENGLISH STT TEST")
     print("=" * 55)
 
-    # Lấy sample rate của microphone
-    sample_rate = get_input_sample_rate()
-
-    # Load model duy nhất một lần
+    # Load the model once.
     print(f"\n[MODEL] Loading Faster-Whisper: {MODEL_SIZE}")
 
     start_time = time.perf_counter()
@@ -278,7 +313,10 @@ def main():
     model = WhisperModel(
         MODEL_SIZE,
         device=DEVICE,
-        compute_type=COMPUTE_TYPE
+        compute_type=COMPUTE_TYPE,
+        download_root=str(
+            Path(__file__).resolve().parents[4] / "models" / "whisper"
+        ),
     )
 
     load_time = time.perf_counter() - start_time
@@ -286,20 +324,26 @@ def main():
     print(f"[MODEL] Loaded successfully in {load_time:.2f}s")
 
     try:
+        if args.file is not None:
+            test_audio_file(model, args.file)
+            return
 
-        # Giai đoạn 1: Chờ Wake Word
+        # Get the microphone sample rate.
+        sample_rate = get_input_sample_rate()
+
+        # Phase 1: wait for the wake phrase.
         wait_for_wake_word(model, sample_rate)
 
-        # Cho người dùng một khoảng nghỉ sau Wake Word
+        # Give the user a short pause after the wake phrase.
         time.sleep(0.3)
 
-        # Giai đoạn 2: Ghi nhận câu lệnh
+        # Phase 2: record the command.
         command_audio = record_command(sample_rate)
 
         if command_audio is None:
             return
 
-        # Giai đoạn 3: Nhận dạng câu lệnh
+        # Phase 3: transcribe the command.
         print("\n[STT] Đang xử lý câu lệnh...")
 
         start_time = time.perf_counter()
@@ -311,7 +355,7 @@ def main():
 
         inference_time = time.perf_counter() - start_time
 
-        # Giai đoạn 4: Trả kết quả
+        # Phase 4: print the result.
         print("\n" + "=" * 55)
         print("                 RESULT")
         print("=" * 55)
@@ -322,11 +366,11 @@ def main():
         print(f"Audio duration: {len(command_audio) / TARGET_SAMPLE_RATE:.2f}s")
 
         print("=" * 55)
-        print("[SYSTEM] Hoàn thành một chu trình STT.")
+        print("[SYSTEM] STT cycle completed.")
 
     except KeyboardInterrupt:
 
-        print("\n[SYSTEM] Đã dừng chương trình.")
+        print("\n[SYSTEM] Stopped.")
 
     except Exception as error:
 

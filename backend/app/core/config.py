@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     STT_MODEL: str = "tiny"
     STT_DEVICE: str = "cpu"
     STT_COMPUTE_TYPE: str = "int8"
-    STT_LANGUAGE: str = "vi"
+    STT_LANGUAGE: str = "en"
     STT_BEAM_SIZE: int = Field(default=1, ge=1, le=5)
     STT_MODEL_CACHE_DIR: str = "models/whisper"
 

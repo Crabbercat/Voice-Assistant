@@ -1,21 +1,26 @@
 from types import SimpleNamespace
 
+from app.core.config import Settings
 from app.ai.speech.speech_recognizer import SpeechRecognizer
 
 
-def test_model_is_loaded_once_and_transcription_is_vietnamese() -> None:
+def test_stt_defaults_to_english() -> None:
+    assert Settings(_env_file=None).STT_LANGUAGE == "en"
+
+
+def test_model_is_loaded_once_and_transcription_uses_english() -> None:
     created_models = []
 
     class FakeModel:
         def transcribe(self, audio, **options):
-            assert options["language"] == "vi"
+            assert options["language"] == "en"
             return iter(
                 [
-                    SimpleNamespace(text=" Bật đèn "),
-                    SimpleNamespace(text="phòng khách"),
+                    SimpleNamespace(text=" Turn on "),
+                    SimpleNamespace(text="the living room light"),
                 ]
             ), SimpleNamespace(
-                language="vi",
+                language="en",
                 language_probability=0.98,
                 duration=1.2,
             )
@@ -31,8 +36,8 @@ def test_model_is_loaded_once_and_transcription_is_vietnamese() -> None:
     first = recognizer.transcribe(wav)
     second = recognizer.transcribe(wav)
 
-    assert first["recognized_text"] == "Bật đèn phòng khách"
-    assert first["language"] == "vi"
+    assert first["recognized_text"] == "Turn on the living room light"
+    assert first["language"] == "en"
     assert first["language_probability"] == 0.98
     assert second["recognized_text"] == first["recognized_text"]
     assert len(created_models) == 1

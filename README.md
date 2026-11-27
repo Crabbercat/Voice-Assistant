@@ -172,12 +172,12 @@ Xem [hướng dẫn kiểm thử frontend và backend](docs/testing-guide.md) đ
 pytest backend\tests
 ```
 
-### Demo AI bằng câu lệnh tiếng Việt
+### English voice-command demo
 
-Backend dùng `MockDevice` mặc định (`MOCK_HARDWARE=true`). Cài dependencies AI ở trên, khởi động lại backend, sau đó gửi lệnh phân tích trước:
+The backend uses `MockDevice` by default (`MOCK_HARDWARE=true`). Install the AI dependencies above, restart the backend, then preview an English command:
 
 ```powershell
-$previewBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Bật đèn phòng khách"}')
+$previewBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Turn on the living room light"}')
 $preview = Invoke-RestMethod `
   -Method Post `
   -Uri http://127.0.0.1:8000/api/voice/process `
@@ -186,10 +186,10 @@ $preview = Invoke-RestMethod `
 $preview
 ```
 
-Kết quả preview có intent, thiết bị, độ tin cậy và `execution_status=needs_confirmation`; không thiết bị nào bị điều khiển. Chỉ gửi lại với `execute=true` sau khi người dùng xác nhận:
+The preview returns the intent, device, confidence, and `execution_status=needs_confirmation`; it does not control a device. Only send the command again with `execute=true` after user confirmation:
 
 ```powershell
-$executeBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Bật đèn phòng khách","execute":true}')
+$executeBody = [System.Text.Encoding]::UTF8.GetBytes('{"text":"Turn on the living room light","execute":true}')
 Invoke-RestMethod `
   -Method Post `
   -Uri http://127.0.0.1:8000/api/voice/process `
@@ -197,4 +197,4 @@ Invoke-RestMethod `
   -Body $executeBody
 ```
 
-`Bật đèn` bị từ chối vì có nhiều đèn; `Không bật đèn` bị từ chối do phủ định. Danh mục lệnh và alias hiện tại được trả về tại `GET /api/voice/commands`. Khi cài `stt.txt`, gửi WAV bằng `Content-Type: audio/wav` tới `POST /api/voice/transcribe`; endpoint trả transcript và bản preview, không tự thực thi. Model `tiny` chỉ tải khi gọi STT lần đầu và được dùng lại trong process. Wake word chưa triển khai.
+`Turn on the light` is rejected because multiple lights are available; `Don't turn on the light` is rejected due to negation. English is the default STT language and command vocabulary; Vietnamese command aliases remain available for backward compatibility. The current command catalogue is returned by `GET /api/voice/commands`. After installing `stt.txt`, send an English WAV using `Content-Type: audio/wav` to `POST /api/voice/transcribe`; the endpoint returns a transcript and preview without executing it. The `tiny` model is downloaded on first STT use and reused in the process. Wake Word listening is not integrated into the backend service.

@@ -10,6 +10,8 @@
 > **Primary language:** Vietnamese\
 > **Version:** 1.0
 
+> **Language update (2026-11-28):** English is now the default language for STT, Wake Word recognition, and command examples/catalogue. Existing Vietnamese command aliases remain accepted for backward compatibility. The original Vietnamese examples below describe that legacy compatibility; use `STT_LANGUAGE=en` for current configuration.
+
 ------------------------------------------------------------------------
 
 ## 1. Mission and implementation rules
@@ -24,7 +26,7 @@ smart-home devices by voice:
     (including configurable spoken variants).
 3.  After detecting the Wake Word, it records the following user command
     until silence or timeout.
-4.  Speech-to-Text (STT) converts the recording into Vietnamese text.
+4.  Speech-to-Text (STT) converts the recording into English text by default.
 5.  A command-processing pipeline normalizes the text, finds the closest
     supported command, resolves its intent and target device, and
     calculates a confidence/similarity score.
@@ -93,7 +95,7 @@ Repository: <https://github.com/Crabbercat/Voice-Assistant>
 -   Microphone capture and buffering.
 -   Wake Word detection.
 -   Command audio recording with silence detection and maximum duration.
--   Vietnamese STT using Faster-Whisper.
+-   English STT using Faster-Whisper by default.
 -   Text normalization, including Vietnamese diacritic removal for
     matching.
 -   Command catalogue stored in JSON.
@@ -1133,7 +1135,7 @@ WAKE_WORD_COOLDOWN_SECONDS=2
 STT_MODEL=tiny
 STT_DEVICE=cpu
 STT_COMPUTE_TYPE=int8
-STT_LANGUAGE=vi
+STT_LANGUAGE=en
 STT_BEAM_SIZE=1
 STT_VAD_FILTER=false
 STT_MODEL_CACHE_DIR=models
@@ -1538,7 +1540,7 @@ The implementation is complete only when all of the following exist:
 
 ## 20. Final engineering decisions
 
-1.  **STT:** Faster-Whisper `tiny`, CPU, `int8`, Vietnamese.
+1.  **STT:** Faster-Whisper `tiny`, CPU, `int8`, English by default.
 2.  **Wake Word:** Initially Whisper-based rolling-window detection for
     a working prototype; keep it replaceable with a dedicated
     keyword-spotting model later.
@@ -1560,7 +1562,7 @@ The implementation is complete only when all of the following exist:
     API rather than implementing AI logic.
 
 **The first milestone is not "AI controls a real GPIO device." The first
-milestone is: a Vietnamese text command is correctly resolved,
+milestone is: an English text command is correctly resolved,
 validated, and executed through the existing mock DeviceService. After
 that is stable, connect microphone/STT and finally test real Raspberry
 Pi hardware.**

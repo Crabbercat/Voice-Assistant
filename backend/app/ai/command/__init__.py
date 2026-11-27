@@ -1,1 +1,1 @@
-"""Deterministic Vietnamese command processing."""
+"""Deterministic English-first command processing."""

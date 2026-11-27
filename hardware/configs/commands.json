@@ -1,12 +1,12 @@
 {
   "version": 1,
   "device_types": {
-    "light": ["den", "bong den"],
-    "fan": ["quat", "quat gio"]
+    "light": ["light", "lamp", "den", "bong den"],
+    "fan": ["fan", "quat", "quat gio"]
   },
   "targets": {
-    "living_room": ["phong khach", "phong sinh hoat chung"],
-    "bedroom": ["phong ngu"]
+    "living_room": ["living room", "lounge", "phong khach", "phong sinh hoat chung"],
+    "bedroom": ["bedroom", "bed room", "phong ngu"]
   },
   "commands": [
     {
@@ -15,7 +15,19 @@
       "action": "turn_on",
       "device_type": "light",
       "enabled": true,
-      "aliases": ["bat den", "mo den", "bat bong den", "mo bong den", "bat den len"]
+      "aliases": [
+        "turn on light",
+        "switch on light",
+        "turn the light on",
+        "switch the light on",
+        "power on light",
+        "activate light",
+        "bat den",
+        "mo den",
+        "bat bong den",
+        "mo bong den",
+        "bat den len"
+      ]
     },
     {
       "id": "light_off",
@@ -23,7 +35,17 @@
       "action": "turn_off",
       "device_type": "light",
       "enabled": true,
-      "aliases": ["tat den", "ngat den", "tat bong den"]
+      "aliases": [
+        "turn off light",
+        "switch off light",
+        "turn the light off",
+        "switch the light off",
+        "power off light",
+        "deactivate light",
+        "tat den",
+        "ngat den",
+        "tat bong den"
+      ]
     },
     {
       "id": "fan_on",
@@ -31,7 +53,17 @@
       "action": "turn_on",
       "device_type": "fan",
       "enabled": true,
-      "aliases": ["bat quat", "mo quat", "bat quat gio"]
+      "aliases": [
+        "turn on fan",
+        "switch on fan",
+        "turn the fan on",
+        "switch the fan on",
+        "power on fan",
+        "activate fan",
+        "bat quat",
+        "mo quat",
+        "bat quat gio"
+      ]
     },
     {
       "id": "fan_off",
@@ -39,7 +71,16 @@
       "action": "turn_off",
       "device_type": "fan",
       "enabled": true,
-      "aliases": ["tat quat", "ngat quat"]
+      "aliases": [
+        "turn off fan",
+        "switch off fan",
+        "turn the fan off",
+        "switch the fan off",
+        "power off fan",
+        "deactivate fan",
+        "tat quat",
+        "ngat quat"
+      ]
     }
   ]
 }

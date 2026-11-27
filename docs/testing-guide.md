@@ -103,17 +103,17 @@ Thử từng nội dung sau với `"execute":true`; các lệnh bị từ chối
 
 | Câu lệnh | Kết quả mong đợi |
 |---|---|
-| `Tắt quạt phòng ngủ` | `FAN_OFF`, thiết bị `fan` |
-| `Bật đèn` | `AMBIGUOUS_TARGET` |
-| `Không bật đèn` | `NEGATION_DETECTED` |
-| `Bật đèn phòng khách hay tắt đèn?` | `AMBIGUOUS_COMMAND` |
-| `Bật đèn phòng bếp` | `TARGET_NOT_FOUND` |
+| `Turn off the bedroom fan` | `FAN_OFF`, device `fan` |
+| `Turn on the light` | `AMBIGUOUS_TARGET` |
+| `Don't turn on the light` | `NEGATION_DETECTED` |
+| `Turn on the living room light or turn it off` | `AMBIGUOUS_COMMAND` |
+| `Turn on the kitchen light` | `TARGET_NOT_FOUND` |
 
 `execute` mặc định là `false`. Lệnh phủ định, mơ hồ hoặc không tìm được thiết bị phải luôn bị từ chối.
 
 ## 5. Kiểm thử STT WAV (tùy chọn)
 
-Sau khi cài `backend\requirements\stt.txt`, gửi WAV tiếng Việt (tối đa 10 MB):
+Sau khi cài `backend\requirements\stt.txt`, gửi WAV có lời nói tiếng Anh (tối đa 10 MB):
 
 ```powershell
 Invoke-RestMethod `
@@ -125,6 +125,16 @@ Invoke-RestMethod `
 ```
 
 Endpoint trả về transcript và bản preview của text command. STT không tự thực thi lệnh; cần gửi kết quả qua luồng preview/xác nhận. Kiểm thử tự động dùng model giả để không tải model, không cần microphone và không tác động thiết bị.
+
+### Kiểm tra Wake Word từ file âm thanh
+
+Script `wake_word_test.py` mặc định nghe microphone. Để kiểm tra file offline (không mở microphone, không thực thi thiết bị), từ thư mục gốc repository chạy:
+
+```powershell
+python backend\app\ai\speech\wake_word_test.py --file "recordings\turn light on .wav"
+```
+
+Script in transcript và `Detected`/`Not detected` cho các biến thể đang khai báo trong `WAKE_WORDS`. Faster-Whisper giải mã file và tự xử lý sample rate; model `tiny` cần tải ở lần đầu và được cache trong `models/whisper`. File cần chứa cụm wake word được cấu hình (mặc định `hey berry` và các biến thể). Chế độ này nhận dạng toàn bộ file thành một lần, khác với vòng nghe microphone xử lý từng cửa sổ ba giây.
 
 ## 6. Chạy và kiểm thử Flutter Web
 
@@ -138,10 +148,10 @@ flutter run -d chrome --web-port 5173
 
 Mở `http://localhost:5173`, vào **Cài đặt** và đặt backend URL là `http://127.0.0.1:8000` nếu chưa kết nối. Trên màn hình dashboard:
 
-1. Nhập `Bật đèn phòng khách`, nhấn **Phân tích lệnh**.
+1. Nhập `Turn on the living room light`, nhấn **Phân tích lệnh**.
 2. Xác minh intent, action, thiết bị và độ khớp xuất hiện; trạng thái thiết bị chưa thay đổi.
 3. Nhấn **Xác nhận thực thi**, rồi **Thực thi** trong hộp thoại.
 4. Xác minh giao diện cập nhật trạng thái đèn.
-5. Thử `Bật đèn`, `Không bật đèn` và bảo đảm giao diện hiện lý do từ chối, không thực thi.
+5. Thử `Turn on the light`, `Don't turn on the light` và bảo đảm giao diện hiện lý do từ chối, không thực thi.
 
 Trên thiết bị khác trong LAN, thay `127.0.0.1` bằng IP máy chạy backend. Không mở backend ra Internet công cộng.
