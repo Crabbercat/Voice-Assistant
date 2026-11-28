@@ -5,7 +5,7 @@
     "common.ready": {
       "path": "common/ready.wav",
       "type": "static",
-      "text": "VietHome đã sẵn sàng.",
+      "text": "Bé ry đã sẵn sàng.",
       "description": "Thông báo hệ thống sẵn sàng"
     },
     "common.understood": {
