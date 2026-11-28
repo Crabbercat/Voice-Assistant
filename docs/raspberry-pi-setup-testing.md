@@ -62,6 +62,18 @@ python -m pip install -r backend/requirements/ai.txt
 
 Nếu chỉ muốn chạy demo text-to-device, các bước này là đủ. Không cần cài Faster-Whisper hoặc microphone.
 
+### Cài audio output và TTS tùy chọn
+
+Để phát phản hồi qua loa của Pi, cài PortAudio và thư viện Python dùng chung với audio input; để đọc dữ liệu cảm biến bằng tiếng Việt, cài thêm adapter TTS và engine giọng nói cục bộ:
+
+```bash
+sudo apt install -y libportaudio2 portaudio19-dev espeak-ng
+python -m pip install -r backend/requirements/voice.txt
+python -m pip install -r backend/requirements/tts.txt
+```
+
+Kết nối loa/USB audio rồi kiểm tra output bằng `aplay -l`. Kiểm tra giọng tiếng Việt khả dụng bằng `espeak-ng --voices=vi`; engine có mặt không đảm bảo rằng đã cài voice Việt tương thích với Python speech engine. Tình trạng thực tế được trả tại `/api/voice/response/status`. Static WAV cần được cung cấp riêng (xem mục 8); không dùng file im lặng hoặc file giả làm recording.
+
 ### Cài STT tùy chọn
 
 ```bash
@@ -101,10 +113,17 @@ STT_COMPUTE_TYPE=int8
 STT_LANGUAGE=en
 STT_BEAM_SIZE=1
 STT_MODEL_CACHE_DIR=models/whisper
+VOICE_RESPONSE_ENABLED=true
+VOICE_PLAYBACK_MODE=server
+VOICE_TTS_ENABLED=true
+VOICE_TTS_LANGUAGE=vi-VN
+VOICE_TTS_VOICE=
+VOICE_SENSOR_MAX_AGE_SECONDS=15
 ```
 
 `MOCK_HARDWARE=true` phải được giữ trong quá trình kiểm tra API/UI ban đầu. Chỉ mở quyền truy cập cổng 8000 trong mạng tin cậy; không forward cổng này trực tiếp ra Internet.
 Nếu đã có `backend/.env` từ lần cài trước, hãy đổi `STT_LANGUAGE=vi` thành `STT_LANGUAGE=en`; file `.env` hiện có sẽ được ưu tiên hơn `.env.example`.
+`VOICE_PLAYBACK_MODE=server` phát âm thanh tại backend Pi; frontend hiển thị câu trả lời và trạng thái, không phát lại. Giữ `VOICE_RESPONSE_ENABLED=true`; nếu chưa muốn thử âm thanh, có thể tắt TTS bằng `VOICE_TTS_ENABLED=false` mà không ảnh hưởng API điều khiển thiết bị.
 
 ## 5. Chạy backend
 
@@ -243,6 +262,45 @@ Kiểm tra trên dashboard:
 4. Kiểm tra intent/thiết bị/độ khớp xuất hiện nhưng thiết bị chưa đổi trạng thái.
 5. Nhấn **Xác nhận thực thi**, xác nhận tiếp trong hộp thoại; thiết bị mới đổi trạng thái.
 6. Thử `Turn on the light` và `Don't turn on the light`; giao diện hiển thị lý do từ chối, thiết bị không đổi trạng thái.
+7. Thử **Bật tất cả** và **Tắt tất cả**; xác nhận trạng thái của các thiết bị mock cập nhật.
+8. Thử **Nói nhiệt độ**, **Nói độ ẩm**, **Đọc cả hai**; dashboard hiển thị câu phản hồi và tình trạng phát âm thanh.
+
+### Kiểm thử phản hồi giọng nói (TTS)
+
+Xem trạng thái playback, thiết bị audio, voice Việt và các response key:
+
+```bash
+curl -sS http://127.0.0.1:8000/api/voice/response/status
+```
+
+Yêu cầu phát clip đã ghi âm:
+
+```bash
+curl -sS -X POST \
+  http://127.0.0.1:8000/api/voice/response/play/lights.turned_on
+```
+
+Static clips phải được ghi âm và lưu theo manifest tại `backend/app/ai/tts/assets/static/`; định dạng yêu cầu là WAV mono, PCM signed 16-bit, 16 kHz. Repository chưa có các bản ghi âm nên nếu chưa bổ sung file, `audio_played=false`/`status=unavailable` là kết quả mong đợi, không phải backend crash. Không có microphone/loa hoặc voice Việt cũng không được làm backend API dừng hoạt động.
+
+Yêu cầu đọc cảm biến (TTS cần sensor readings mới hơn `VOICE_SENSOR_MAX_AGE_SECONDS`, mặc định 15 giây):
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/voice/response/sensors/temperature
+curl -sS -X POST http://127.0.0.1:8000/api/voice/response/sensors/humidity
+curl -sS -X POST http://127.0.0.1:8000/api/voice/response/sensors/summary
+```
+
+Khi có sensor data mới, kiểm tra `response_mode=tts`, `text` tiếng Việt, các giá trị trong `data` và `audio_played=true`. Với cấu hình mock hoặc DHT11 chưa có dữ liệu, API trả unavailable/stale một cách tường minh. Nếu `tts_available=false`, cài/kiểm tra voice tiếng Việt tương thích của hệ điều hành; không dùng voice tiếng Anh làm fallback.
+
+Endpoint bulk điều khiển thiết bị (cũng được gọi từ hai nút trên dashboard):
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/devices/state/all \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"is_on":true}'
+```
+
+Response chứa kết quả từng thiết bị cùng `voice_response`; `partial=true` nghĩa là không phải mọi thiết bị đều hoàn tất thao tác.
 
 Nếu giao diện được mở từ một origin web khác, trình duyệt có thể chặn request do CORS. Backend hiện chỉ cho phép `http://localhost:5173` và `http://127.0.0.1:5173`. Khi đó chạy frontend ở một trong các origin được phép hoặc chủ động cập nhật danh sách CORS để thêm đúng origin tin cậy; không mở CORS cho mọi origin khi backend điều khiển thiết bị.
 
@@ -440,6 +498,7 @@ Không cấu hình nhiều Uvicorn workers. Nếu chuyển sang GPIO thật, tr�
 - `VOICE_AUTO_EXECUTE` mặc định tắt. Chỉ bật khi demo với `MOCK_HARDWARE=true`; không tự thực thi bằng GPIO thật.
 - Model STT tải lần đầu cần mạng; chưa kiểm thử benchmark CPU/RAM/thời gian trên Raspberry Pi.
 - Driver cảm biến DHT11 được import tùy điều kiện và không có trong bộ requirements cơ bản; nhiệt độ/độ ẩm có thể hiển thị `—`.
+- Static response recording không được cung cấp trong repository. Phát WAV thật cần clip theo manifest, thiết bị output hoạt động và định dạng đúng; dynamic TTS cần voice tiếng Việt tương thích.
 - Cấu hình thiết bị ví dụ có thể không khớp registry và chân GPIO trong code; registry trong source hiện tại mới là hành vi thực tế.
 - Không có sơ đồ wiring hoàn chỉnh được xác nhận trong repository; chỉ dùng hardware mode sau khi tự xác minh mạch.
 

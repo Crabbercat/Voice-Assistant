@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,15 @@ class Settings(BaseSettings):
     VOICE_AUTO_START: bool = False
     VOICE_AUTO_EXECUTE: bool = False
     VOICE_HISTORY_LIMIT: int = Field(default=50, ge=1, le=500)
+    VOICE_RESPONSE_ENABLED: bool = True
+    VOICE_PLAYBACK_MODE: Literal["server"] = "server"
+    VOICE_STATIC_AUDIO_DIR: str = "backend/app/ai/tts/assets/static"
+    VOICE_TTS_ENABLED: bool = True
+    VOICE_TTS_PROVIDER: Literal["local"] = "local"
+    VOICE_TTS_LANGUAGE: str = "vi-VN"
+    VOICE_TTS_VOICE: str = ""
+    VOICE_TTS_RATE: float = Field(default=1.0, ge=0.5, le=2.0)
+    VOICE_SENSOR_MAX_AGE_SECONDS: int = Field(default=15, gt=0, le=3600)
     COMMAND_CATALOG_PATH: str = "hardware/configs/commands.json"
     DATABASE_URL: str = "sqlite+aiosqlite:///./viethome.db"
     API_PREFIX: str = "/api/v1"

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.api.voice_routes import router as voice_router
+from app.api.voice_response_routes import router as voice_response_router
 from app.core.config import settings
 from app.services.voice_service import (
     VoiceServiceUnavailableError,
@@ -68,4 +69,5 @@ async def health_check() -> dict[str, str]:
 
 app.include_router(router)
 app.include_router(voice_router)
+app.include_router(voice_response_router)
 

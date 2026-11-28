@@ -1,3 +1,5 @@
+import 'voice_response_result.dart';
+
 class VoiceCommandResult {
   const VoiceCommandResult({
     required this.accepted,
@@ -10,6 +12,7 @@ class VoiceCommandResult {
     this.deviceId,
     this.confidence,
     this.execution,
+    this.voiceResponse,
   });
 
   final bool accepted;
@@ -22,8 +25,10 @@ class VoiceCommandResult {
   final String? deviceId;
   final double? confidence;
   final Map<String, dynamic>? execution;
+  final VoiceResponseResult? voiceResponse;
 
   factory VoiceCommandResult.fromJson(Map<String, dynamic> json) {
+    final response = json['voice_response'];
     return VoiceCommandResult(
       accepted: json['accepted'] as bool,
       reason: json['reason'] as String,
@@ -35,6 +40,9 @@ class VoiceCommandResult {
       deviceId: json['device_id'] as String?,
       confidence: (json['confidence'] as num?)?.toDouble(),
       execution: json['execution'] as Map<String, dynamic>?,
+      voiceResponse: response is Map<String, dynamic>
+          ? VoiceResponseResult.fromJson(response)
+          : null,
     );
   }
 }

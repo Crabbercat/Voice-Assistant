@@ -63,6 +63,7 @@ async def process_command(request: CommandRequest) -> dict[str, object]:
             voice_service.process,
             request.text,
             execute=request.execute,
+            request_id=request.request_id,
         )
     except CatalogueConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

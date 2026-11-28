@@ -18,6 +18,7 @@ python -m pip install -r backend\requirements\development.txt
 python -m pip install -r backend\requirements\ai.txt
 python -m pip install -r backend\requirements\stt.txt
 python -m pip install -r backend\requirements\voice.txt
+python -m pip install -r backend\requirements\tts.txt
 Copy-Item backend\.env.example backend\.env
 ```
 
@@ -25,7 +26,7 @@ Copy-Item backend\.env.example backend\.env
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-pip libportaudio2 portaudio19-dev
+sudo apt install -y python3-venv python3-pip libportaudio2 portaudio19-dev espeak-ng
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -33,10 +34,11 @@ python -m pip install -r backend/requirements/development.txt
 python -m pip install -r backend/requirements/ai.txt
 python -m pip install -r backend/requirements/stt.txt
 python -m pip install -r backend/requirements/voice.txt
+python -m pip install -r backend/requirements/tts.txt
 cp backend/.env.example backend/.env
 ```
 
-`stt.txt` cung cấp Faster-Whisper; `voice.txt` cung cấp thư viện microphone và resampling. Nếu chỉ thử text command, chỉ cần `development.txt` và `ai.txt`. Model `tiny` tải về ở lần đầu gọi STT hoặc khởi động listener; model được nạp một lần và tái sử dụng cho các lần nhận dạng tiếp theo.
+`stt.txt` cung cấp Faster-Whisper; `voice.txt` cung cấp thư viện microphone, resampling và phát WAV qua PortAudio; `tts.txt` cung cấp adapter TTS cục bộ. Nếu chỉ thử text command, chỉ cần `development.txt` và `ai.txt`. Model `tiny` tải về ở lần đầu gọi STT hoặc khởi động listener; model được nạp một lần và tái sử dụng cho các lần nhận dạng tiếp theo.
 
 ## 2. Cấu hình demo an toàn
 
@@ -56,9 +58,16 @@ WAKE_WORDS=hey berry,hey barry,hey beri,hey very,hey be ri
 VOICE_ENABLED=true
 VOICE_AUTO_START=false
 VOICE_AUTO_EXECUTE=false
+VOICE_RESPONSE_ENABLED=true
+VOICE_PLAYBACK_MODE=server
+VOICE_TTS_ENABLED=true
+VOICE_TTS_LANGUAGE=vi-VN
+VOICE_SENSOR_MAX_AGE_SECONDS=15
 ```
 
 `VOICE_ENABLED=true` cho phép gọi API mở microphone; listener không tự mở mic khi import backend. `VOICE_AUTO_START=false` yêu cầu khởi động listener tường minh qua API. Để dùng microphone ngoài thiết bị mặc định, đặt `AUDIO_INPUT_DEVICE` thành tên hoặc chỉ số input device có trong danh sách của `sounddevice`.
+
+`VOICE_RESPONSE_ENABLED=true` bật phần phản hồi âm thanh. Backend Raspberry Pi phát âm thanh qua loa; frontend chỉ hiển thị lời phản hồi và trạng thái phát để tránh phát lặp. `VOICE_TTS_VOICE` để trống cho phép tự chọn voice tiếng Việt tương thích.
 
 ## 3. Khởi chạy backend và frontend
 
@@ -198,7 +207,38 @@ Các endpoint microphone:
 | `POST` | `/api/voice/stop` | Dừng listener, đóng microphone, giải phóng model |
 | `GET` | `/api/voice/history?limit=20` | Xem tối đa 100 kết quả xử lý gần nhất |
 
-## 7. Kiểm thử tự động
+## 7. Kiểm thử phản hồi giọng nói và TTS
+
+Kiểm tra tình trạng provider và các static response key đã đăng ký:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/voice/response/status |
+  ConvertTo-Json -Depth 5
+```
+
+Để phát thử một clip đã ghi âm:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  http://127.0.0.1:8000/api/voice/response/play/lights.turned_on |
+  ConvertTo-Json -Depth 5
+```
+
+Các WAV thật phải được đặt đúng thư mục và đường dẫn khai báo trong `backend/app/ai/tts/assets/manifest.json`, ở dưới `backend/app/ai/tts/assets/static/`. Mỗi file cần là WAV mono, PCM signed 16-bit, 16 kHz. Repository chưa kèm các file ghi âm; khi thiếu file, API trả `audio_played=false` và `status=unavailable` có nêu nguyên nhân, không tạo audio giả. Có thể dùng endpoint status để xem thiết bị phát âm thanh có sẵn hay không.
+
+Yêu cầu đọc dữ liệu cảm biến bằng TTS:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/voice/response/sensors/temperature
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/voice/response/sensors/humidity
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/voice/response/sensors/summary
+```
+
+Kết quả thành công cần có `response_mode=tts`, giá trị trong `data`, câu tiếng Việt trong `text`, và `audio_played=true`. Đọc `tts_available` tại endpoint status trước khi thử; hệ điều hành phải có voice tiếng Việt. Cài `backend/requirements/tts.txt` và trên Raspberry Pi cài `espeak-ng`; nếu không có voice Việt hoặc sensor chưa có dữ liệu mới, API trả trạng thái unavailable/stale thay vì dùng voice tiếng Anh hay dữ liệu cũ.
+
+Dashboard hiện có nút **Nói nhiệt độ**, **Nói độ ẩm**, **Đọc cả hai**, **Bật tất cả** và **Tắt tất cả**. Các lệnh thiết bị đơn và bulk đều dùng `DeviceService` hiện tại; khi thao tác thất bại/partial, kết quả nêu rõ trạng thái thay vì thông báo thành công toàn phần.
+
+## 8. Kiểm thử tự động
 
 Từ thư mục gốc, chạy:
 
@@ -208,12 +248,12 @@ python -m pytest backend\tests
 
 Các test voice listener dùng capture, recognizer và DeviceService giả; không cần microphone, không tải model, không gọi GPIO. Hướng dẫn kiểm thử Raspberry Pi chi tiết và chẩn đoán microphone nằm tại [raspberry-pi-setup-testing.md](./raspberry-pi-setup-testing.md).
 
-## 8. Giới hạn demo
+## 9. Giới hạn demo
 
 - Voice listener chạy trong một process backend duy nhất; không chạy nhiều Uvicorn workers.
 - Microphone được chọn theo `AUDIO_INPUT_DEVICE` hoặc input mặc định của hệ điều hành.
 - Wake Word được nhận dạng bằng STT trên cửa sổ âm thanh, không phải mô hình wake-word chuyên dụng.
-- TTS chưa nằm trong demo này.
+- Repository chưa cung cấp WAV ghi âm thật; static playback chỉ phát thành công sau khi thêm các clip đúng manifest. TTS động cần cài local voice tiếng Việt tương thích và thiết bị phát âm thanh trên backend.
 - Frontend hiện chưa có nút start/stop microphone; dùng API hoặc Swagger để quản lý listener.
 - Luồng giọng nói tự thực thi chỉ nên demo với mock hardware. Không bật `VOICE_AUTO_EXECUTE` khi dùng thiết bị GPIO thật.
 - Chưa xác nhận thời gian tải, mức RAM và hiệu năng model trên Raspberry Pi cụ thể; lần đầu cần mạng để tải model.

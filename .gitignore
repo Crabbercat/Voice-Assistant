@@ -9,6 +9,8 @@ __pycache__/
 *.sqlite3
 models/**/*
 !models/**/.gitkeep
+backend/app/ai/tts/assets/cache/*
+!backend/app/ai/tts/assets/cache/.gitkeep
 dist/
 build/
 node_modules/

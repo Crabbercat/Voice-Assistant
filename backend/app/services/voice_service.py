@@ -21,6 +21,7 @@ from app.ai.speech.speech_recognizer import (
     SpeechRecognizer,
 )
 from app.ai.speech.wake_word_detector import WakeWordDetector
+from app.ai.tts.service import VoiceResponseService, voice_response_service
 from app.core.config import settings
 from app.devices.registry import DeviceRegistry, device_registry
 from app.services.device_service import DeviceService, device_service
@@ -59,11 +60,13 @@ class VoiceService:
         registry: DeviceRegistry = device_registry,
         speech_recognizer: SpeechRecognizer | None = None,
         capture_factory: Callable[[], Any] | None = None,
+        response_service: VoiceResponseService | None = None,
     ) -> None:
         self.device_service = device_service_instance
         self.registry = registry
         self.speech_recognizer = speech_recognizer or SpeechRecognizer()
         self._capture_factory = capture_factory
+        self.response_service = response_service or voice_response_service
         self._processor: CommandProcessor | None = None
         self._catalogue_error: str | None = None
         self._state = "STOPPED"
@@ -118,7 +121,12 @@ class VoiceService:
     def transcribe(self, audio: bytes) -> dict[str, Any]:
         return self.speech_recognizer.transcribe(audio)
 
-    def process(self, text: str, execute: bool = False) -> dict[str, Any]:
+    def process(
+        self,
+        text: str,
+        execute: bool = False,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         try:
             result = self._get_processor().process(text)
         except CatalogueConfigurationError:
@@ -132,7 +140,7 @@ class VoiceService:
         )
         result["message"] = _REASONS.get(result["reason"], result["reason"])
         if execute:
-            return self._execute_result(result)
+            return self._execute_result(result, request_id=request_id)
         return result
 
     def _empty_result(self, text: str, reason: str) -> dict[str, Any]:
@@ -151,30 +159,68 @@ class VoiceService:
             "threshold": settings.COMMAND_SIMILARITY_THRESHOLD,
         }
 
-    def _execute_result(self, result: dict[str, Any]) -> dict[str, Any]:
+    def _execute_result(
+        self,
+        result: dict[str, Any],
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         if not result["accepted"]:
             return result
 
         device_id = result["device_id"]
+        is_on = result["action"] == "turn_on"
         if not isinstance(device_id, str) or self.registry.get(device_id) is None:
+            response = self.response_service.respond_to_device(
+                device_id if isinstance(device_id, str) else "",
+                is_on,
+                success=False,
+                request_id=request_id,
+                error="Device not found.",
+            )
             result.update(
                 accepted=False,
                 reason="TARGET_NOT_FOUND",
                 execution_status="rejected",
                 message=_REASONS["TARGET_NOT_FOUND"],
+                voice_response=response.model_dump(mode="json"),
             )
             return result
 
-        is_on = result["action"] == "turn_on"
         try:
             execution = self.device_service.set_device_state(device_id, is_on)
         except Exception as error:
             logger.exception("Voice command execution failed for %s", device_id)
+            response = self.response_service.respond_to_device(
+                device_id,
+                is_on,
+                success=False,
+                request_id=request_id,
+                error=str(error),
+            )
             result.update(
                 reason="EXECUTION_FAILED",
                 execution_status="failed",
                 message=f"Không thực thi được lệnh: {error}",
                 execution={"success": False, "error": str(error)},
+                voice_response=response.model_dump(mode="json"),
+            )
+            return result
+
+        succeeded = execution.get("is_on") is is_on
+        response = self.response_service.respond_to_device(
+            device_id,
+            is_on,
+            success=succeeded,
+            request_id=request_id,
+            operation_result=execution,
+        )
+        if not succeeded:
+            result.update(
+                reason="EXECUTION_FAILED",
+                execution_status="failed",
+                message="Thiết bị không chuyển sang trạng thái được yêu cầu.",
+                execution={"success": False, "device": execution},
+                voice_response=response.model_dump(mode="json"),
             )
             return result
 
@@ -182,6 +228,7 @@ class VoiceService:
             execution_status="succeeded",
             message="Đã thực thi lệnh thành công.",
             execution={"success": True, "device": execution},
+            voice_response=response.model_dump(mode="json"),
         )
         return result
 

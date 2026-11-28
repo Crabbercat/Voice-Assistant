@@ -2,10 +2,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.ai.tts.schemas import VoiceResponseResult
+
 
 class CommandRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     execute: bool = False
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class CommandResponse(BaseModel):
@@ -24,3 +27,4 @@ class CommandResponse(BaseModel):
     execution_status: str
     message: str
     execution: dict[str, Any] | None = None
+    voice_response: VoiceResponseResult | None = None

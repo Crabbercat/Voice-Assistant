@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "default_locale": "vi-VN",
+  "responses": {
+    "common.ready": {
+      "path": "common/ready.wav",
+      "type": "static",
+      "text": "VietHome đã sẵn sàng.",
+      "description": "Thông báo hệ thống sẵn sàng"
+    },
+    "common.understood": {
+      "path": "common/understood.wav",
+      "type": "static",
+      "text": "Tôi đã nhận được yêu cầu.",
+      "description": "Xác nhận đã nhận yêu cầu"
+    },
+    "common.action_success": {
+      "path": "common/action_success.wav",
+      "type": "static",
+      "text": "Đã thực hiện yêu cầu.",
+      "description": "Xác nhận thao tác thành công"
+    },
+    "common.action_failed": {
+      "path": "common/action_failed.wav",
+      "type": "static",
+      "text": "Xin lỗi, tôi chưa thể thực hiện yêu cầu.",
+      "description": "Thông báo thao tác thất bại"
+    },
+    "common.device_unavailable": {
+      "path": "common/device_unavailable.wav",
+      "type": "static",
+      "text": "Thiết bị hiện không khả dụng.",
+      "description": "Thông báo thiết bị không khả dụng"
+    },
+    "common.partial_success": {
+      "path": "common/partial_success.wav",
+      "type": "static",
+      "text": "Một số thiết bị chưa thể thực hiện yêu cầu.",
+      "description": "Thông báo thao tác thiết bị thành công một phần"
+    },
+    "lights.turned_on": {
+      "path": "lights/turned_on.wav",
+      "type": "static",
+      "text": "Đã bật đèn.",
+      "description": "Xác nhận bật đèn"
+    },
+    "lights.turned_off": {
+      "path": "lights/turned_off.wav",
+      "type": "static",
+      "text": "Đã tắt đèn.",
+      "description": "Xác nhận tắt đèn"
+    },
+    "fans.turned_on": {
+      "path": "fans/turned_on.wav",
+      "type": "static",
+      "text": "Đã bật quạt.",
+      "description": "Xác nhận bật quạt"
+    },
+    "fans.turned_off": {
+      "path": "fans/turned_off.wav",
+      "type": "static",
+      "text": "Đã tắt quạt.",
+      "description": "Xác nhận tắt quạt"
+    },
+    "devices.all_turned_on": {
+      "path": "devices/all_turned_on.wav",
+      "type": "static",
+      "text": "Đã bật tất cả thiết bị.",
+      "description": "Xác nhận bật tất cả thiết bị"
+    },
+    "devices.all_turned_off": {
+      "path": "devices/all_turned_off.wav",
+      "type": "static",
+      "text": "Đã tắt tất cả thiết bị.",
+      "description": "Xác nhận tắt tất cả thiết bị"
+    },
+    "sensors.unavailable": {
+      "path": "sensors/unavailable.wav",
+      "type": "static",
+      "text": "Hiện tại chưa có dữ liệu cảm biến.",
+      "description": "Thông báo không có dữ liệu cảm biến"
+    },
+    "sensors.stale": {
+      "path": "sensors/stale.wav",
+      "type": "static",
+      "text": "Dữ liệu cảm biến đã cũ, vui lòng thử lại sau.",
+      "description": "Thông báo dữ liệu cảm biến đã cũ"
+    }
+  }
+}

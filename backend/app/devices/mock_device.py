@@ -25,7 +25,6 @@ _humidity = None
 _last_success = 0.0
 
 READ_INTERVAL = 3.0
-MAX_DATA_AGE = 15.0
 
 
 def _sensor_worker():
@@ -59,6 +58,23 @@ def _sensor_worker():
         time.sleep(READ_INTERVAL)
 
 
+def _sensor_status_locked(now: float) -> str:
+    if _last_success == 0:
+        return "unavailable"
+    if now - _last_success > settings.VOICE_SENSOR_MAX_AGE_SECONDS:
+        return "stale"
+    if _temperature is None or _humidity is None:
+        return "unavailable"
+    return "available"
+
+
+def get_temperature_humidity_status() -> str:
+    if settings.MOCK_HARDWARE:
+        return "unavailable"
+    with _sensor_lock:
+        return _sensor_status_locked(time.monotonic())
+
+
 def read_temperature_humidity():
     global _sensor_started
 
@@ -77,9 +93,7 @@ def read_temperature_humidity():
             _sensor_started = True
 
     with _sensor_lock:
-        age = time.monotonic() - _last_success
-
-        if _last_success == 0 or age > MAX_DATA_AGE:
+        if _sensor_status_locked(time.monotonic()) != "available":
             return None, None
 
         return _temperature, _humidity

@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/voice_response_result.dart';
 import 'fan_blades_icon.dart';
 
 class FanSpeedCard extends StatefulWidget {
@@ -14,6 +15,7 @@ class FanSpeedCard extends StatefulWidget {
   final String room;
   final bool initialIsOn;
   final VoidCallback? onStateChanged;
+  final ValueChanged<VoiceResponseResult>? onVoiceResponse;
 
   const FanSpeedCard({
     super.key,
@@ -22,6 +24,7 @@ class FanSpeedCard extends StatefulWidget {
     this.room = 'Phòng ngủ',
     this.initialIsOn = false,
     this.onStateChanged,
+    this.onVoiceResponse,
   });
 
   @override
@@ -157,6 +160,12 @@ class _FanSpeedCardState extends State<FanSpeedCard> {
         _level = confirmedLevel;
       });
 
+      final voiceResponse = data['voice_response'];
+      if (voiceResponse is Map<String, dynamic>) {
+        widget.onVoiceResponse?.call(
+          VoiceResponseResult.fromJson(voiceResponse),
+        );
+      }
       widget.onStateChanged?.call();
     } catch (error) {
       if (!mounted || revision != _revision) return;

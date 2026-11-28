@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:viethome_frontend/models/dashboard_snapshot.dart';
 import 'package:viethome_frontend/models/smart_device.dart';
 import 'package:viethome_frontend/models/voice_command_result.dart';
+import 'package:viethome_frontend/models/voice_response_result.dart';
 import 'package:viethome_frontend/services/home_api.dart';
 
 import '../widgets/fan_blades_icon.dart';
@@ -42,6 +43,8 @@ class _HomePageState extends State<HomePage> {
   bool _savingServer = false;
   bool _readingDashboard = false;
   bool _processingCommand = false;
+  bool _processingVoiceResponse = false;
+  bool _processingBulkCommand = false;
 
   int _failedRequests = 0;
   int _selectedTab = 0;
@@ -53,6 +56,8 @@ class _HomePageState extends State<HomePage> {
 
   List<SmartDevice> _devices = [];
   VoiceCommandResult? _voiceCommandResult;
+  VoiceResponseResult? _lastVoiceResponse;
+  String? _pendingCommandRequestId;
 
   final List<String> _history = [];
   final Set<String> _pendingDevices = {};
@@ -242,17 +247,19 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final updated = await _homeApi.setDeviceState(
+      final operation = await _homeApi.setDeviceState(
         baseUrl: requestUrl,
         deviceId: device.deviceId,
         isOn: isOn,
       );
+      final updated = operation.device;
 
       if (!mounted || requestUrl != _backendBaseUrl) {
         return;
       }
 
       setState(() {
+        _lastVoiceResponse = operation.voiceResponse;
         _devices = _devices
             .map(
               (item) => item.deviceId == updated.deviceId ? updated : item,
@@ -282,6 +289,61 @@ class _HomePageState extends State<HomePage> {
         _fetchDashboard();
       }
     }
+  }
+
+  Future<void> _setAllDevices(bool isOn) async {
+    if (!_serverConnected || _processingBulkCommand) return;
+    final requestUrl = _backendBaseUrl;
+    setState(() => _processingBulkCommand = true);
+    try {
+      final result = await _homeApi.setAllDeviceStates(
+        baseUrl: requestUrl,
+        isOn: isOn,
+      );
+      if (!mounted || requestUrl != _backendBaseUrl) return;
+      setState(() => _lastVoiceResponse = result.voiceResponse);
+      if (!result.success) {
+        _showMessage(
+          result.partial
+              ? 'Một số thiết bị chưa thực hiện được yêu cầu.'
+              : 'Không thể điều khiển các thiết bị.',
+          isError: true,
+        );
+      }
+      await _fetchDashboard();
+    } catch (error) {
+      if (mounted) {
+        _showMessage('Không điều khiển được tất cả thiết bị: $error',
+            isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _processingBulkCommand = false);
+    }
+  }
+
+  Future<void> _requestSensorSpeech(String sensor) async {
+    if (!_serverConnected || _processingVoiceResponse) return;
+    final requestUrl = _backendBaseUrl;
+    setState(() => _processingVoiceResponse = true);
+    try {
+      final result = await _homeApi.requestSensorSpeech(
+        baseUrl: requestUrl,
+        sensor: sensor,
+      );
+      if (!mounted || requestUrl != _backendBaseUrl) return;
+      setState(() => _lastVoiceResponse = result);
+    } catch (error) {
+      if (mounted) {
+        _showMessage('Không thể đọc dữ liệu cảm biến: $error', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _processingVoiceResponse = false);
+    }
+  }
+
+  void _handleVoiceResponse(VoiceResponseResult response) {
+    if (!mounted) return;
+    setState(() => _lastVoiceResponse = response);
   }
 
   void _addHistory(String action) {
@@ -323,6 +385,11 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _processingCommand = true;
       _voiceCommandResult = null;
+      if (!execute) {
+        _pendingCommandRequestId =
+            '${DateTime.now().microsecondsSinceEpoch}-command';
+        _lastVoiceResponse = null;
+      }
     });
 
     try {
@@ -330,9 +397,15 @@ class _HomePageState extends State<HomePage> {
         baseUrl: _backendBaseUrl,
         text: text,
         execute: execute,
+        requestId: _pendingCommandRequestId,
       );
       if (!mounted) return;
-      setState(() => _voiceCommandResult = result);
+      setState(() {
+        _voiceCommandResult = result;
+        if (result.voiceResponse != null) {
+          _lastVoiceResponse = result.voiceResponse;
+        }
+      });
       if (result.executionStatus == 'succeeded') {
         await _fetchDashboard();
       }
@@ -342,7 +415,10 @@ class _HomePageState extends State<HomePage> {
       }
     } finally {
       if (mounted) {
-        setState(() => _processingCommand = false);
+        setState(() {
+          _processingCommand = false;
+          if (execute) _pendingCommandRequestId = null;
+        });
       }
     }
   }
@@ -487,9 +563,15 @@ class _HomePageState extends State<HomePage> {
                   'Thiết bị trong nhà',
                   Icons.home_filled,
                 ),
+                const SizedBox(height: 10),
+                _buildBulkDeviceActions(),
                 const SizedBox(height: 14),
                 _buildDeviceGrid(),
                 const SizedBox(height: 16),
+                if (_lastVoiceResponse != null) ...[
+                  _buildVoiceResponsePanel(_lastVoiceResponse!),
+                  const SizedBox(height: 16),
+                ],
                 _buildVoicePanel(),
               ],
             ),
@@ -614,63 +696,160 @@ class _HomePageState extends State<HomePage> {
           vertical: 14,
         ),
         borderRadius: 22,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Column(
           children: [
-            _SensorItem(
-              icon: Icons.thermostat_rounded,
-              color: const Color(0xFFFFB74D),
-              value: _formatValue(_temperature, 1, '°C'),
-              label: 'Nhiệt độ',
-            ),
-            _SensorItem(
-              icon: Icons.water_drop_rounded,
-              color: const Color(0xFF4FC3F7),
-              value: _formatValue(_humidity, 0, '%'),
-              label: 'Độ ẩm',
-            ),
-            Container(
-              width: 1,
-              height: 40,
-              color: Colors.white24,
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                _SensorItem(
+                  icon: Icons.thermostat_rounded,
+                  color: const Color(0xFFFFB74D),
+                  value: _formatValue(_temperature, 1, '°C'),
+                  label: 'Nhiệt độ',
+                ),
+                _SensorItem(
+                  icon: Icons.water_drop_rounded,
+                  color: const Color(0xFF4FC3F7),
+                  value: _formatValue(_humidity, 0, '%'),
+                  label: 'Độ ẩm',
+                ),
+                Container(
+                  width: 1,
+                  height: 40,
+                  color: Colors.white24,
+                ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 9,
-                      height: 9,
-                      decoration: BoxDecoration(
-                        color: _serverConnected ? _green : Colors.redAccent,
-                        shape: BoxShape.circle,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: _serverConnected ? _green : Colors.redAccent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _serverConnected ? 'Online' : 'Offline',
+                          style: TextStyle(
+                            color: _serverConnected ? _green : Colors.redAccent,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 5),
-                    Text(
-                      _serverConnected ? 'Online' : 'Offline',
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Trạng thái',
                       style: TextStyle(
-                        color: _serverConnected ? _green : Colors.redAccent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
+                        color: _secondaryText,
+                        fontSize: 12,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Trạng thái',
-                  style: TextStyle(
-                    color: _secondaryText,
-                    fontSize: 12,
-                  ),
-                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 4,
+              runSpacing: 0,
+              children: [
+                _sensorSpeechButton('temperature', 'Nói nhiệt độ'),
+                _sensorSpeechButton('humidity', 'Nói độ ẩm'),
+                _sensorSpeechButton('summary', 'Đọc cả hai'),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _sensorSpeechButton(String sensor, String label) {
+    return TextButton.icon(
+      onPressed: _serverConnected && !_processingVoiceResponse
+          ? () => _requestSensorSpeech(sensor)
+          : null,
+      icon: _processingVoiceResponse
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.volume_up_rounded, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+    );
+  }
+
+  Widget _buildBulkDeviceActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _serverConnected && !_processingBulkCommand
+                ? () => _setAllDevices(true)
+                : null,
+            icon: const Icon(Icons.power_settings_new_rounded),
+            label: const Text('Bật tất cả'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _serverConnected && !_processingBulkCommand
+                ? () => _setAllDevices(false)
+                : null,
+            icon: const Icon(Icons.power_off_rounded),
+            label: const Text('Tắt tất cả'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVoiceResponsePanel(VoiceResponseResult response) {
+    final played = response.audioPlayed;
+    final color = played ? _green : const Color(0xFFFFB74D);
+    return _GlassPanel(
+      padding: const EdgeInsets.all(14),
+      borderRadius: 18,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            played ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            color: color,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  response.text ?? response.responseKey ?? 'Voice response',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  played
+                      ? 'Âm thanh đã phát trên máy chủ.'
+                      : response.error ?? 'Chưa phát được âm thanh.',
+                  style: TextStyle(color: color, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -729,6 +908,7 @@ class _HomePageState extends State<HomePage> {
             room: device.room,
             initialIsOn: device.isOn,
             onStateChanged: _fetchDashboard,
+            onVoiceResponse: _handleVoiceResponse,
           );
         }
 
