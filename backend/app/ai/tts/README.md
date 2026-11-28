@@ -2,23 +2,18 @@
 
 The backend owns audio playback (`VOICE_PLAYBACK_MODE=server`). Static
 recordings belong under `assets/static/`; the manifest is
-`assets/manifest.json`. No recordings are currently supplied, so static
-response requests return their response text and a controlled
-`unavailable` playback result until the matching WAV files are recorded.
-Do not add silent or generated placeholder files as recordings.
+`assets/manifest.json`. Seven manifest clips are currently supplied:
+`common.action_failed`, `common.action_success`,
+`common.device_unavailable`, `common.ready`, `common.understood`,
+`lights.turned_off`, and `lights.turned_on`. The other seven keys listed
+below still need recordings; requests for those keys return a controlled
+`unavailable` playback result. Do not add silent or generated placeholder
+files as recordings.
 
-## Recording checklist
+## Remaining recording checklist
 
-Record one clear, natural Vietnamese utterance for every manifest entry:
-
-- `common/ready.wav` — “VietHome đã sẵn sàng.”
-- `common/understood.wav` — “Tôi đã nhận được yêu cầu.”
-- `common/action_success.wav` — “Đã thực hiện yêu cầu.”
-- `common/action_failed.wav` — “Xin lỗi, tôi chưa thể thực hiện yêu cầu.”
-- `common/device_unavailable.wav` — “Thiết bị hiện không khả dụng.”
+Record one clear, natural Vietnamese utterance for each remaining entry:
 - `common/partial_success.wav` — “Một số thiết bị chưa thể thực hiện yêu cầu.”
-- `lights/turned_on.wav` — “Đã bật đèn.”
-- `lights/turned_off.wav` — “Đã tắt đèn.”
 - `fans/turned_on.wav` — “Đã bật quạt.”
 - `fans/turned_off.wav` — “Đã tắt quạt.”
 - `devices/all_turned_on.wav` — “Đã bật tất cả thiết bị.”

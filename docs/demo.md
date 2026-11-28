@@ -253,7 +253,7 @@ Các test voice listener dùng capture, recognizer và DeviceService giả; khô
 - Voice listener chạy trong một process backend duy nhất; không chạy nhiều Uvicorn workers.
 - Microphone được chọn theo `AUDIO_INPUT_DEVICE` hoặc input mặc định của hệ điều hành.
 - Wake Word được nhận dạng bằng STT trên cửa sổ âm thanh, không phải mô hình wake-word chuyên dụng.
-- Repository chưa cung cấp WAV ghi âm thật; static playback chỉ phát thành công sau khi thêm các clip đúng manifest. TTS động cần cài local voice tiếng Việt tương thích và thiết bị phát âm thanh trên backend.
+- Repository hiện có WAV đúng định dạng cho `common.action_failed`, `common.action_success`, `common.device_unavailable`, `common.ready`, `common.understood`, `lights.turned_off` và `lights.turned_on`. Các key còn lại cần được ghi âm theo manifest trước khi phát được. TTS động cần cài local voice tiếng Việt tương thích và thiết bị phát âm thanh trên backend.
 - Frontend hiện chưa có nút start/stop microphone; dùng API hoặc Swagger để quản lý listener.
 - Luồng giọng nói tự thực thi chỉ nên demo với mock hardware. Không bật `VOICE_AUTO_EXECUTE` khi dùng thiết bị GPIO thật.
 - Chưa xác nhận thời gian tải, mức RAM và hiệu năng model trên Raspberry Pi cụ thể; lần đầu cần mạng để tải model.
