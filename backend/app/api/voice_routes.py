@@ -56,6 +56,13 @@ async def get_voice_history(
     return voice_service.get_history(limit)
 
 
+@router.get("/debug")
+async def get_voice_debug_log(
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[dict[str, object]]:
+    return voice_service.get_debug_log(limit)
+
+
 @router.post("/process", response_model=CommandResponse)
 async def process_command(request: CommandRequest) -> dict[str, object]:
     try:

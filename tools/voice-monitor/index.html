@@ -103,6 +103,20 @@
     .entry-text { margin: 0 0 8px; color: #fff; font-size: 1.05rem; }
     .entry-meta { color: #9fb0c9; font-size: 0.85rem; line-height: 1.6; }
     .empty { color: #9fb0c9; }
+    .audio-meter {
+      height: 10px;
+      margin-top: 9px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #263650;
+    }
+    .audio-meter-fill {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: #51d39b;
+      transition: width 120ms linear;
+    }
 
     @media (max-width: 520px) {
       .toolbar { flex-wrap: wrap; }
@@ -113,7 +127,7 @@
 <body>
   <header>
     <h1>VietHome — Voice Monitor</h1>
-    <p>Theo dõi trạng thái STT và câu lệnh đã nhận dạng từ listener trên Raspberry Pi.</p>
+    <p>Theo dõi các lần STT thử nhận dạng, mức tín hiệu microphone và câu lệnh cuối cùng.</p>
   </header>
 
   <section class="panel" aria-label="Kết nối backend">
@@ -149,6 +163,14 @@
         <span class="label">Wake word</span>
         <span id="wake-word" class="value">—</span>
       </div>
+      <div class="status-item">
+        <span class="label">Tín hiệu microphone</span>
+        <span id="audio-level" class="value">RMS — · Peak —</span>
+        <div class="audio-meter" role="meter" aria-label="Mức RMS microphone"
+             aria-valuemin="0" aria-valuemax="0.03" aria-valuenow="0">
+          <div id="audio-meter-fill" class="audio-meter-fill"></div>
+        </div>
+      </div>
     </div>
     <p id="listener-error" class="hint error" hidden></p>
   </section>
@@ -156,7 +178,13 @@
   <section class="panel" aria-label="Transcript gần nhất">
     <h2>Transcript gần nhất</h2>
     <div id="last-transcript" class="transcript">Chưa nhận dạng câu lệnh nào.</div>
-    <p class="hint">Transcript xuất hiện sau khi STT xử lý xong câu nói; trang này không hiển thị audio hoặc partial transcript.</p>
+    <p class="hint">Mức mic cập nhật trực tiếp. Transcript lệnh xuất hiện sau khi người nói dừng; không lưu hoặc phát audio.</p>
+  </section>
+
+  <section class="panel" aria-label="Các lần STT thử nhận dạng">
+    <h2>Các lần STT thử nhận dạng</h2>
+    <div id="diagnostic-log"><p class="empty">Đang chờ listener kiểm tra âm thanh...</p></div>
+    <p class="hint">Wake window là các đoạn âm thanh chồng lấp được STT kiểm tra liên tục; văn bản có thể lặp hoặc rỗng. Lệnh hoàn chỉnh được ghi riêng trong lịch sử bên dưới.</p>
   </section>
 
   <section class="panel" aria-label="Lịch sử nhận dạng">
@@ -175,6 +203,10 @@
     const wakeWord = document.querySelector("#wake-word");
     const listenerError = document.querySelector("#listener-error");
     const lastTranscript = document.querySelector("#last-transcript");
+    const audioLevel = document.querySelector("#audio-level");
+    const audioMeter = document.querySelector(".audio-meter");
+    const audioMeterFill = document.querySelector("#audio-meter-fill");
+    const diagnosticLog = document.querySelector("#diagnostic-log");
     const historyList = document.querySelector("#history");
     let backendUrl = localStorage.getItem("viethome-voice-monitor-backend")
       || urlInput.value;
@@ -235,6 +267,52 @@
       }
     }
 
+    function renderDiagnostics(entries, unavailableMessage) {
+      diagnosticLog.replaceChildren();
+      if (!Array.isArray(entries) || entries.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = unavailableMessage
+          || "Chưa có lần nhận dạng. Hãy bật listener để bắt đầu theo dõi.";
+        diagnosticLog.append(empty);
+        return;
+      }
+
+      for (const entry of entries) {
+        const article = document.createElement("article");
+        article.className = "entry";
+
+        const transcript = document.createElement("p");
+        transcript.className = "entry-text";
+        transcript.textContent = entry.text || "(Không nhận dạng được chữ trong đoạn này)";
+
+        const stage = entry.stage === "wake_window"
+          ? (entry.wake_detected ? "Wake word khớp" : "Đang dò wake word")
+          : entry.stage === "wake_window_error"
+            ? "Lỗi nhận dạng wake window"
+            : "Kết quả câu lệnh";
+        const metrics = [
+          entry.rms == null ? null : `RMS ${Number(entry.rms).toFixed(4)}`,
+          entry.peak == null ? null : `Peak ${Number(entry.peak).toFixed(4)}`,
+          entry.duration_seconds == null
+            ? null
+            : `${Number(entry.duration_seconds).toFixed(2)} giây`,
+        ].filter(Boolean);
+        const details = document.createElement("div");
+        details.className = "entry-meta";
+        details.textContent = [
+          formatTime(entry.timestamp),
+          stage,
+          ...metrics,
+          entry.language || null,
+          entry.error || null,
+        ].filter(Boolean).join(" · ");
+
+        article.append(transcript, details);
+        diagnosticLog.append(article);
+      }
+    }
+
     async function refresh() {
       if (refreshing) return;
       refreshing = true;
@@ -242,18 +320,25 @@
       connectionMessage.textContent = "Đang lấy trạng thái...";
       try {
         const base = apiBase();
-        const [statusResponse, historyResponse] = await Promise.all([
+        const [statusResponse, historyResponse, debugResponse] = await Promise.all([
           fetch(`${base}/api/voice/status`, { cache: "no-store" }),
           fetch(`${base}/api/voice/history?limit=50`, { cache: "no-store" }),
+          fetch(`${base}/api/voice/debug?limit=80`, { cache: "no-store" }),
         ]);
         if (!statusResponse.ok || !historyResponse.ok) {
           throw new Error(`Backend trả HTTP ${statusResponse.status}/${historyResponse.status}`);
         }
 
-        const [status, entries] = await Promise.all([
+        const [status, entries, debugEntries] = await Promise.all([
           statusResponse.json(),
           historyResponse.json(),
+          debugResponse.ok ? debugResponse.json() : Promise.resolve(null),
         ]);
+        const debugUnavailableMessage = debugResponse.ok
+          ? null
+          : debugResponse.status === 404
+            ? "Backend chưa hỗ trợ log STT chi tiết. Hãy cập nhật backend rồi khởi động lại."
+            : `Không lấy được log STT chi tiết: HTTP ${debugResponse.status}.`;
 
         setValue(
           listenerState,
@@ -274,9 +359,21 @@
           status.model_loaded ? "good" : "warn",
         );
         setValue(wakeWord, status.wake_word || "—");
+        const rms = Number(status.audio_rms || 0);
+        const peak = Number(status.audio_peak || 0);
+        const threshold = Number(status.audio_threshold || 0);
+        audioLevel.textContent = `RMS ${rms.toFixed(4)} · Peak ${peak.toFixed(4)} · ngưỡng ${threshold.toFixed(4)}`;
+        const meterMaximum = 0.03;
+        const meterValue = Math.min(meterMaximum, Math.max(0, rms));
+        audioMeter.setAttribute("aria-valuenow", meterValue.toFixed(5));
+        audioMeterFill.style.width = `${(meterValue / meterMaximum) * 100}%`;
         listenerError.hidden = !status.last_error;
         listenerError.textContent = status.last_error || "";
         lastTranscript.textContent = status.last_transcript || "Chưa nhận dạng câu lệnh nào.";
+        renderDiagnostics(
+          debugEntries,
+          debugUnavailableMessage,
+        );
         renderHistory(entries);
         connectionMessage.textContent = `Đang kết nối ${base} · cập nhật ${new Date().toLocaleTimeString()}`;
         connectionMessage.className = "hint good";

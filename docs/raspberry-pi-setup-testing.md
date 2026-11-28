@@ -407,14 +407,14 @@ curl -sS -X POST http://127.0.0.1:8000/api/voice/stop
 
 ### Theo dõi transcript bằng trang HTML riêng trên laptop
 
-Trang monitor chỉ đọc trạng thái và lịch sử của backend; nó không mở mic trên laptop, không truyền audio và không thực thi lệnh. Listener phải được khởi động trên Pi như phần trên. Sau khi cập nhật backend trên Pi để cho phép CORS từ `localhost:3000`, trên laptop mở PowerShell tại thư mục repository:
+Trang monitor chỉ đọc trạng thái, log chẩn đoán và lịch sử của backend; nó không mở mic trên laptop, không truyền audio và không thực thi lệnh. Listener phải được khởi động trên Pi như phần trên. Sau khi cập nhật backend trên Pi để cho phép CORS từ `localhost:3000`, trên laptop mở PowerShell tại thư mục repository:
 
 ```powershell
 Set-Location tools\voice-monitor
 python -m http.server 3000 --bind 127.0.0.1
 ```
 
-Mở `http://localhost:3000`, giữ Backend URL là `http://192.168.1.116:8000` (hoặc sửa theo IP hiện tại của Pi), rồi nhấn **Kết nối**. Trang tự làm mới status và lịch sử mỗi 1.5 giây; khi nói “Hey Berry” rồi câu lệnh, transcript hoàn chỉnh cùng intent, target và trạng thái validation sẽ xuất hiện. STT hiện xử lý sau khi kết thúc câu nói nên trang này không hiển thị transcript từng phần khi đang nói.
+Mở `http://localhost:3000`, giữ Backend URL là `http://192.168.1.116:8000` (hoặc sửa theo IP hiện tại của Pi), rồi nhấn **Kết nối**. Trang tự làm mới mỗi 1.5 giây, hiển thị RMS/peak microphone trực tiếp, các transcript từ những wake window STT thử nhận dạng, và lịch sử riêng của câu lệnh hoàn chỉnh. Wake window chồng lấp nên transcript có thể lặp hoặc rỗng; STT câu lệnh vẫn được xử lý sau khi người nói dừng. Backend cung cấp các lần thử gần nhất qua `GET /api/voice/debug?limit=80`; log chỉ giữ trong RAM (tối đa 200 sự kiện), không chứa audio và mất khi backend khởi động lại.
 
 ### Chạy script chẩn đoán microphone độc lập
 

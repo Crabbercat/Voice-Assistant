@@ -194,10 +194,29 @@ def test_live_voice_command_executes_through_device_service(monkeypatch) -> None
         assert history[0]["execution_status"] == "succeeded"
         assert device_service.calls == [("light", True)]
         assert recognizer.transcription_count == 2
+
+        debug_entries = service.get_debug_log()
+        wake_entry = next(
+            entry for entry in debug_entries if entry["stage"] == "wake_window"
+        )
+        command_entry = next(
+            entry for entry in debug_entries if entry["stage"] == "command_result"
+        )
+        assert wake_entry["text"] == "Hey Berry"
+        assert wake_entry["wake_detected"] is True
+        assert wake_entry["rms"] == pytest.approx(0.002)
+        assert wake_entry["peak"] == pytest.approx(0.002)
+        assert command_entry["text"] == "Turn on the living room light"
+        assert command_entry["peak"] == pytest.approx(0.02)
+        assert history[0]["rms"] is not None
+        assert history[0]["peak"] == pytest.approx(0.02)
     finally:
         service.stop()
 
-    assert service.get_status()["state"] == "STOPPED"
+    stopped_status = service.get_status()
+    assert stopped_status["state"] == "STOPPED"
+    assert stopped_status["audio_rms"] == 0.0
+    assert stopped_status["audio_peak"] == 0.0
     assert recognizer.loaded is False
 
 

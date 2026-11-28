@@ -43,6 +43,7 @@ _REASONS = {
     "CATALOGUE_ERROR": "Cấu hình lệnh AI không hợp lệ.",
     "SERVICE_NOT_READY": "Chưa cài thư viện AI cần thiết để xử lý lệnh.",
 }
+_DEBUG_HISTORY_LIMIT = 200
 
 
 class VoiceServiceDisabledError(RuntimeError):
@@ -74,6 +75,8 @@ class VoiceService:
         self._last_transcript: str | None = None
         self._microphone_available = False
         self._microphone_name: str | None = None
+        self._audio_rms = 0.0
+        self._audio_peak = 0.0
         self._capture: Any | None = None
         self._listener_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -81,6 +84,9 @@ class VoiceService:
         self._lifecycle_lock = threading.Lock()
         self._history: deque[dict[str, Any]] = deque(
             maxlen=settings.VOICE_HISTORY_LIMIT
+        )
+        self._debug_log: deque[dict[str, Any]] = deque(
+            maxlen=_DEBUG_HISTORY_LIMIT
         )
         self._wake_detector: WakeWordDetector | None = None
 
@@ -242,6 +248,9 @@ class VoiceService:
                 "model_loaded": self.speech_recognizer.is_loaded,
                 "microphone_available": self._microphone_available,
                 "microphone": self._microphone_name,
+                "audio_rms": self._audio_rms,
+                "audio_peak": self._audio_peak,
+                "audio_threshold": settings.AUDIO_SILENCE_THRESHOLD,
                 "last_transcript": self._last_transcript,
                 "last_error": self._last_error,
                 "wake_word": next(
@@ -257,6 +266,14 @@ class VoiceService:
     def get_history(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._state_lock:
             return [dict(entry) for entry in list(self._history)[-limit:][::-1]]
+
+    def get_debug_log(self, limit: int = 100) -> list[dict[str, Any]]:
+        bounded_limit = max(1, min(limit, _DEBUG_HISTORY_LIMIT))
+        with self._state_lock:
+            return [
+                dict(entry)
+                for entry in list(self._debug_log)[-bounded_limit:][::-1]
+            ]
 
     def start(self) -> dict[str, Any]:
         if not settings.VOICE_ENABLED:
@@ -277,6 +294,8 @@ class VoiceService:
                     }
                 self._state = "STARTING"
                 self._last_error = None
+                self._audio_rms = 0.0
+                self._audio_peak = 0.0
 
             capture: Any | None = None
             try:
@@ -323,6 +342,8 @@ class VoiceService:
                     self._microphone_name = None
                     self._state = "ERROR"
                     self._last_error = str(error)
+                    self._audio_rms = 0.0
+                    self._audio_peak = 0.0
                 raise VoiceServiceUnavailableError(str(error)) from error
 
         logger.info("Voice listener started")
@@ -380,6 +401,8 @@ class VoiceService:
                 self._microphone_name = None
                 self._state = "ERROR" if stop_error else "STOPPED"
                 self._last_error = str(stop_error) if stop_error else None
+                self._audio_rms = 0.0
+                self._audio_peak = 0.0
             if stop_error is not None:
                 raise VoiceServiceUnavailableError(str(stop_error)) from stop_error
 
@@ -400,6 +423,8 @@ class VoiceService:
                 self._last_error = str(error)
                 capture = self._capture
                 self._microphone_available = False
+                self._audio_rms = 0.0
+                self._audio_peak = 0.0
             if capture is not None:
                 try:
                     capture.stop()
@@ -438,6 +463,7 @@ class VoiceService:
             if not frame:
                 continue
 
+            frame_rms, _ = self._update_audio_level(frame)
             frame_duration = len(frame) / settings.AUDIO_SAMPLE_RATE
             state = self.get_status()["state"]
             if state == "WAITING_WAKE_WORD":
@@ -454,19 +480,43 @@ class VoiceService:
                 ):
                     continue
                 last_wake_check = timestamp
+                wake_audio = self._join_audio(wake_frames)
                 try:
-                    wake_audio = self._join_audio(wake_frames)
                     transcription = self.speech_recognizer.transcribe_samples(
                         wake_audio,
                         settings.AUDIO_SAMPLE_RATE,
                     )
                 except SpeechRecognitionError as error:
                     self._set_last_error(str(error))
+                    self._add_debug_event(
+                        "wake_window_error",
+                        rms=self._calculate_rms(wake_audio),
+                        peak=self._calculate_peak(wake_audio),
+                        duration_seconds=(
+                            len(wake_audio) / settings.AUDIO_SAMPLE_RATE
+                        ),
+                        error=str(error),
+                    )
                     logger.warning("Wake-word transcription failed: %s", error)
                     continue
 
                 transcript = transcription["recognized_text"]
-                if not wake_detector.detect(transcript):
+                wake_detected = wake_detector.detect(transcript)
+                self._add_debug_event(
+                    "wake_window",
+                    text=transcript,
+                    rms=self._calculate_rms(wake_audio),
+                    peak=self._calculate_peak(wake_audio),
+                    duration_seconds=(
+                        len(wake_audio) / settings.AUDIO_SAMPLE_RATE
+                    ),
+                    wake_detected=wake_detected,
+                    language=transcription.get("language"),
+                    language_probability=transcription.get(
+                        "language_probability"
+                    ),
+                )
+                if not wake_detected:
                     continue
 
                 logger.info("Wake word detected")
@@ -488,8 +538,7 @@ class VoiceService:
 
             command_frames.append(frame)
             command_duration += frame_duration
-            rms = self._calculate_rms(frame)
-            if rms >= settings.AUDIO_SILENCE_THRESHOLD:
+            if frame_rms >= settings.AUDIO_SILENCE_THRESHOLD:
                 speech_started = True
                 speech_duration += frame_duration
                 silence_duration = 0.0
@@ -512,7 +561,7 @@ class VoiceService:
                 continue
 
             if command_duration >= settings.COMMAND_START_TIMEOUT_SECONDS and not speech_started:
-                self._record_no_speech()
+                self._record_no_speech(self._join_audio(command_frames))
                 command_frames = []
                 command_duration = 0.0
                 speech_duration = 0.0
@@ -527,7 +576,7 @@ class VoiceService:
                 if speech_started and speech_duration >= settings.COMMAND_MIN_DURATION:
                     self._process_command_audio(self._join_audio(command_frames))
                 else:
-                    self._record_no_speech()
+                    self._record_no_speech(self._join_audio(command_frames))
                 command_frames = []
                 command_duration = 0.0
                 speech_duration = 0.0
@@ -553,9 +602,26 @@ class VoiceService:
             return 0.0
         return math.sqrt(sum(sample * sample for sample in frame) / len(frame))
 
+    @staticmethod
+    def _calculate_peak(frame: Any) -> float:
+        if not frame:
+            return 0.0
+        return max(abs(sample) for sample in frame)
+
+    def _update_audio_level(self, frame: Any) -> tuple[float, float]:
+        rms = self._calculate_rms(frame)
+        peak = self._calculate_peak(frame)
+        with self._state_lock:
+            self._audio_rms = rms
+            self._audio_peak = peak
+        return rms, peak
+
     def _process_command_audio(self, audio: Any) -> None:
         with self._state_lock:
             self._state = "PROCESSING"
+        rms = self._calculate_rms(audio)
+        peak = self._calculate_peak(audio)
+        duration_seconds = len(audio) / settings.AUDIO_SAMPLE_RATE
         try:
             transcription = self.speech_recognizer.transcribe_samples(
                 audio,
@@ -564,8 +630,18 @@ class VoiceService:
         except SpeechRecognitionError as error:
             self._set_last_error(str(error))
             logger.exception("Command speech recognition failed")
-            self._record_stt_error(str(error))
+            self._record_stt_error(
+                str(error),
+                {
+                    "rms": rms,
+                    "peak": peak,
+                    "duration_seconds": duration_seconds,
+                },
+            )
         else:
+            transcription["rms"] = rms
+            transcription["peak"] = peak
+            transcription["duration_seconds"] = duration_seconds
             transcript = transcription["recognized_text"]
             result = self.process(transcript)
             if result["accepted"] and settings.VOICE_AUTO_EXECUTE:
@@ -584,24 +660,37 @@ class VoiceService:
                 with self._state_lock:
                     self._state = "WAITING_WAKE_WORD"
 
-    def _record_no_speech(self) -> None:
+    def _record_no_speech(self, audio: Any | None = None) -> None:
         result = self._empty_result("", "NO_SPEECH")
         result.update(
             execution=None,
             execution_status="rejected",
             message=_REASONS["NO_SPEECH"],
         )
-        self._add_history({}, result)
+        transcription = (
+            {
+                "rms": self._calculate_rms(audio),
+                "peak": self._calculate_peak(audio),
+                "duration_seconds": len(audio) / settings.AUDIO_SAMPLE_RATE,
+            }
+            if audio is not None
+            else {}
+        )
+        self._add_history(transcription, result)
         logger.info("No speech detected after Wake Word")
 
-    def _record_stt_error(self, message: str) -> None:
+    def _record_stt_error(
+        self,
+        message: str,
+        transcription: dict[str, Any] | None = None,
+    ) -> None:
         result = self._empty_result("", "STT_ERROR")
         result.update(
             execution=None,
             execution_status="failed",
             message=message,
         )
-        self._add_history({}, result)
+        self._add_history(transcription or {}, result)
 
     def _add_history(
         self,
@@ -621,10 +710,73 @@ class VoiceService:
             "execution_status": result["execution_status"],
             "execution": result["execution"],
             "language": transcription.get("language"),
+            "rms": transcription.get("rms"),
+            "peak": transcription.get("peak"),
+            "duration_seconds": transcription.get("duration_seconds"),
         }
         with self._state_lock:
             self._last_transcript = result["recognized_text"]
             self._history.append(entry)
+        self._add_debug_event(
+            "command_result",
+            text=result["recognized_text"],
+            rms=transcription.get("rms"),
+            peak=transcription.get("peak"),
+            duration_seconds=transcription.get("duration_seconds"),
+            language=transcription.get("language"),
+            language_probability=transcription.get("language_probability"),
+            accepted=result["accepted"],
+            reason=result["reason"],
+            intent=result["intent"],
+            action=result["action"],
+            target=result["target"],
+            execution_status=result["execution_status"],
+            error=result.get("message")
+            if result["reason"] == "STT_ERROR"
+            else None,
+        )
+
+    def _add_debug_event(
+        self,
+        stage: str,
+        *,
+        text: str = "",
+        rms: float | None = None,
+        peak: float | None = None,
+        duration_seconds: float | None = None,
+        wake_detected: bool | None = None,
+        language: str | None = None,
+        language_probability: float | None = None,
+        accepted: bool | None = None,
+        reason: str | None = None,
+        intent: str | None = None,
+        action: str | None = None,
+        target: Any = None,
+        execution_status: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        with self._state_lock:
+            self._debug_log.append(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "stage": stage,
+                    "state": self._state,
+                    "text": text,
+                    "rms": round(float(rms), 6) if rms is not None else None,
+                    "peak": round(float(peak), 6) if peak is not None else None,
+                    "duration_seconds": duration_seconds,
+                    "wake_detected": wake_detected,
+                    "language": language,
+                    "language_probability": language_probability,
+                    "accepted": accepted,
+                    "reason": reason,
+                    "intent": intent,
+                    "action": action,
+                    "target": target,
+                    "execution_status": execution_status,
+                    "error": error,
+                }
+            )
 
     def _set_last_error(self, error: str) -> None:
         with self._state_lock:

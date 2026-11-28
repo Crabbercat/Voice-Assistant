@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.main import app
 from app.services.device_service import device_service
 from app.ai.tts.service import voice_response_service
+from app.services.voice_service import voice_service
 
 client = TestClient(app)
 
@@ -32,6 +33,20 @@ def test_voice_monitor_localhost_origin_is_allowed() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_voice_debug_endpoint_returns_listener_diagnostics(monkeypatch) -> None:
+    expected = [{"stage": "wake_window", "text": "Hey Berry"}]
+    monkeypatch.setattr(
+        voice_service,
+        "get_debug_log",
+        lambda limit: expected if limit == 1 else [],
+    )
+
+    response = client.get("/api/voice/debug?limit=1")
+
+    assert response.status_code == 200
+    assert response.json() == expected
 
 
 def test_static_response_endpoint_rejects_unknown_key() -> None:
