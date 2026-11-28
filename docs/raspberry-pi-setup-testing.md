@@ -302,7 +302,7 @@ curl -sS -X POST http://127.0.0.1:8000/devices/state/all \
 
 Response chứa kết quả từng thiết bị cùng `voice_response`; `partial=true` nghĩa là không phải mọi thiết bị đều hoàn tất thao tác.
 
-Nếu giao diện được mở từ một origin web khác, trình duyệt có thể chặn request do CORS. Backend hiện chỉ cho phép `http://localhost:5173` và `http://127.0.0.1:5173`. Khi đó chạy frontend ở một trong các origin được phép hoặc chủ động cập nhật danh sách CORS để thêm đúng origin tin cậy; không mở CORS cho mọi origin khi backend điều khiển thiết bị.
+Nếu giao diện được mở từ một origin web khác, trình duyệt có thể chặn request do CORS. Backend cho phép `localhost` và `127.0.0.1` trên cổng 5173 (Flutter Web) và 3000 (voice monitor). Không mở CORS cho mọi origin khi backend điều khiển thiết bị.
 
 ## 9. Kiểm thử STT bằng WAV qua API (tùy chọn)
 
@@ -404,6 +404,17 @@ Dừng listener:
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/voice/stop
 ```
+
+### Theo dõi transcript bằng trang HTML riêng trên laptop
+
+Trang monitor chỉ đọc trạng thái và lịch sử của backend; nó không mở mic trên laptop, không truyền audio và không thực thi lệnh. Listener phải được khởi động trên Pi như phần trên. Sau khi cập nhật backend trên Pi để cho phép CORS từ `localhost:3000`, trên laptop mở PowerShell tại thư mục repository:
+
+```powershell
+Set-Location tools\voice-monitor
+python -m http.server 3000 --bind 127.0.0.1
+```
+
+Mở `http://localhost:3000`, giữ Backend URL là `http://192.168.1.116:8000` (hoặc sửa theo IP hiện tại của Pi), rồi nhấn **Kết nối**. Trang tự làm mới status và lịch sử mỗi 1.5 giây; khi nói “Hey Berry” rồi câu lệnh, transcript hoàn chỉnh cùng intent, target và trạng thái validation sẽ xuất hiện. STT hiện xử lý sau khi kết thúc câu nói nên trang này không hiển thị transcript từng phần khi đang nói.
 
 ### Chạy script chẩn đoán microphone độc lập
 

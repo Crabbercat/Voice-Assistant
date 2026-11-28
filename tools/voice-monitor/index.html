@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VietHome Voice Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #0b1220;
+      color: #e5edf8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    h1 { margin: 0 0 6px; font-size: 1.6rem; }
+    h2 { margin: 0 0 14px; font-size: 1.1rem; }
+    p { color: #9fb0c9; }
+
+    .panel {
+      margin-top: 16px;
+      padding: 18px;
+      border: 1px solid #263650;
+      border-radius: 12px;
+      background: #121d30;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    input {
+      min-width: 0;
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid #405574;
+      border-radius: 8px;
+      background: #0b1220;
+      color: inherit;
+    }
+
+    button {
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #1687d9;
+      color: white;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: 0.55; cursor: wait; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .status-item {
+      padding: 12px;
+      border-radius: 9px;
+      background: #0b1220;
+    }
+
+    .label {
+      display: block;
+      margin-bottom: 5px;
+      color: #8fa3bf;
+      font-size: 0.8rem;
+    }
+
+    .value { font-weight: 650; overflow-wrap: anywhere; }
+    .good { color: #51d39b; }
+    .bad { color: #ff7777; }
+    .warn { color: #ffc96b; }
+
+    .transcript {
+      min-height: 48px;
+      color: #fff;
+      font-size: 1.15rem;
+      overflow-wrap: anywhere;
+    }
+
+    .hint { margin-bottom: 0; font-size: 0.9rem; }
+    .error { color: #ff9a9a; }
+
+    .entry {
+      padding: 13px 0;
+      border-top: 1px solid #263650;
+    }
+
+    .entry:first-child { border-top: 0; padding-top: 0; }
+    .entry-text { margin: 0 0 8px; color: #fff; font-size: 1.05rem; }
+    .entry-meta { color: #9fb0c9; font-size: 0.85rem; line-height: 1.6; }
+    .empty { color: #9fb0c9; }
+
+    @media (max-width: 520px) {
+      .toolbar { flex-wrap: wrap; }
+      .toolbar input { flex-basis: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>VietHome — Voice Monitor</h1>
+    <p>Theo dõi trạng thái STT và câu lệnh đã nhận dạng từ listener trên Raspberry Pi.</p>
+  </header>
+
+  <section class="panel" aria-label="Kết nối backend">
+    <h2>Kết nối</h2>
+    <div class="toolbar">
+      <input id="backend-url" type="url" value="http://192.168.1.116:8000"
+             aria-label="Backend URL" spellcheck="false">
+      <button id="connect-button" type="button">Kết nối</button>
+    </div>
+    <p id="connection-message" class="hint">Đang kết nối...</p>
+  </section>
+
+  <section class="panel" aria-label="Trạng thái listener">
+    <h2>Trạng thái STT</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="label">Listener</span>
+        <span id="listener-state" class="value">Đang tải...</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Trạng thái xử lý</span>
+        <span id="listener-phase" class="value">—</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Microphone</span>
+        <span id="microphone" class="value">—</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Whisper model</span>
+        <span id="model-state" class="value">—</span>
+      </div>
+      <div class="status-item">
+        <span class="label">Wake word</span>
+        <span id="wake-word" class="value">—</span>
+      </div>
+    </div>
+    <p id="listener-error" class="hint error" hidden></p>
+  </section>
+
+  <section class="panel" aria-label="Transcript gần nhất">
+    <h2>Transcript gần nhất</h2>
+    <div id="last-transcript" class="transcript">Chưa nhận dạng câu lệnh nào.</div>
+    <p class="hint">Transcript xuất hiện sau khi STT xử lý xong câu nói; trang này không hiển thị audio hoặc partial transcript.</p>
+  </section>
+
+  <section class="panel" aria-label="Lịch sử nhận dạng">
+    <h2>Lịch sử nhận dạng</h2>
+    <div id="history"><p class="empty">Chưa có bản ghi.</p></div>
+  </section>
+
+  <script>
+    const urlInput = document.querySelector("#backend-url");
+    const connectButton = document.querySelector("#connect-button");
+    const connectionMessage = document.querySelector("#connection-message");
+    const listenerState = document.querySelector("#listener-state");
+    const listenerPhase = document.querySelector("#listener-phase");
+    const microphone = document.querySelector("#microphone");
+    const modelState = document.querySelector("#model-state");
+    const wakeWord = document.querySelector("#wake-word");
+    const listenerError = document.querySelector("#listener-error");
+    const lastTranscript = document.querySelector("#last-transcript");
+    const historyList = document.querySelector("#history");
+    let backendUrl = localStorage.getItem("viethome-voice-monitor-backend")
+      || urlInput.value;
+    let refreshing = false;
+
+    urlInput.value = backendUrl;
+
+    function apiBase() {
+      const parsed = new URL(backendUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Backend URL phải bắt đầu bằng http:// hoặc https://");
+      }
+      return parsed.href.replace(/\/+$/, "");
+    }
+
+    function setValue(element, value, className) {
+      element.textContent = value;
+      element.className = `value ${className || ""}`.trim();
+    }
+
+    function formatTime(value) {
+      if (!value) return "Không có thời gian";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function renderHistory(entries) {
+      historyList.replaceChildren();
+      if (!Array.isArray(entries) || entries.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "Chưa có bản ghi. Hãy gọi wake word rồi nói câu lệnh.";
+        historyList.append(empty);
+        return;
+      }
+
+      for (const entry of entries) {
+        const article = document.createElement("article");
+        article.className = "entry";
+
+        const transcript = document.createElement("p");
+        transcript.className = "entry-text";
+        transcript.textContent = entry.recognized_text || "(Không nhận dạng được câu nói)";
+
+        const details = document.createElement("div");
+        details.className = "entry-meta";
+        const target = entry.target || entry.device_id || "—";
+        const intent = entry.intent || "Không xác định";
+        const action = entry.action || "—";
+        const decision = entry.accepted
+          ? "Đã nhận lệnh"
+          : `Từ chối: ${entry.reason || "không xác định"}`;
+        const outcome = entry.execution_status || "—";
+        details.textContent = `${formatTime(entry.timestamp)} · ${intent} · ${action} · ${target} · ${decision} · ${outcome}`;
+
+        article.append(transcript, details);
+        historyList.append(article);
+      }
+    }
+
+    async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
+      connectButton.disabled = true;
+      connectionMessage.textContent = "Đang lấy trạng thái...";
+      try {
+        const base = apiBase();
+        const [statusResponse, historyResponse] = await Promise.all([
+          fetch(`${base}/api/voice/status`, { cache: "no-store" }),
+          fetch(`${base}/api/voice/history?limit=50`, { cache: "no-store" }),
+        ]);
+        if (!statusResponse.ok || !historyResponse.ok) {
+          throw new Error(`Backend trả HTTP ${statusResponse.status}/${historyResponse.status}`);
+        }
+
+        const [status, entries] = await Promise.all([
+          statusResponse.json(),
+          historyResponse.json(),
+        ]);
+
+        setValue(
+          listenerState,
+          status.running ? "Đang chạy" : "Đã dừng",
+          status.running ? "good" : "warn",
+        );
+        setValue(listenerPhase, status.state || "—");
+        setValue(
+          microphone,
+          status.microphone_available
+            ? (status.microphone || "Sẵn sàng")
+            : "Không khả dụng",
+          status.microphone_available ? "good" : "warn",
+        );
+        setValue(
+          modelState,
+          status.model_loaded ? "Đã nạp" : "Chưa nạp",
+          status.model_loaded ? "good" : "warn",
+        );
+        setValue(wakeWord, status.wake_word || "—");
+        listenerError.hidden = !status.last_error;
+        listenerError.textContent = status.last_error || "";
+        lastTranscript.textContent = status.last_transcript || "Chưa nhận dạng câu lệnh nào.";
+        renderHistory(entries);
+        connectionMessage.textContent = `Đang kết nối ${base} · cập nhật ${new Date().toLocaleTimeString()}`;
+        connectionMessage.className = "hint good";
+      } catch (error) {
+        connectionMessage.textContent = `Không kết nối được: ${error.message}. Kiểm tra IP backend, mạng và CORS.`;
+        connectionMessage.className = "hint error";
+      } finally {
+        refreshing = false;
+        connectButton.disabled = false;
+      }
+    }
+
+    connectButton.addEventListener("click", () => {
+      backendUrl = urlInput.value.trim();
+      localStorage.setItem("viethome-voice-monitor-backend", backendUrl);
+      refresh();
+    });
+
+    refresh();
+    setInterval(refresh, 1500);
+  </script>
+</body>
+</html>

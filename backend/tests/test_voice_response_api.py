@@ -21,13 +21,36 @@ def test_voice_response_status_is_available_without_audio_hardware() -> None:
     assert result["audio_output_available"] in (True, False)
 
 
+def test_voice_monitor_localhost_origin_is_allowed() -> None:
+    response = client.options(
+        "/api/voice/status",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 def test_static_response_endpoint_rejects_unknown_key() -> None:
     response = client.post("/api/voice/response/play/unknown.key")
 
     assert response.status_code == 404
 
 
-def test_known_static_response_returns_controlled_missing_asset_result() -> None:
+def test_known_static_response_returns_controlled_missing_output_result(
+    monkeypatch,
+) -> None:
+    def unavailable_output(frames: bytes, sample_rate: int) -> None:
+        raise RuntimeError("Speaker unavailable for test.")
+
+    monkeypatch.setattr(
+        voice_response_service.static_player,
+        "_playback",
+        unavailable_output,
+    )
     response = client.post("/api/voice/response/play/common.ready")
 
     assert response.status_code == 200
@@ -35,7 +58,7 @@ def test_known_static_response_returns_controlled_missing_asset_result() -> None
     assert result["response_key"] == "common.ready"
     assert result["audio_played"] is False
     assert result["status"] == "unavailable"
-    assert "recording" in result["error"].lower()
+    assert "audio output" in result["error"].lower()
 
 
 def test_sensor_summary_uses_current_dashboard_readings(
