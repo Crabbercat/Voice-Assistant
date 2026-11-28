@@ -280,7 +280,7 @@ curl -sS -X POST \
   http://127.0.0.1:8000/api/voice/response/play/lights.turned_on
 ```
 
-Static clips được lưu theo manifest tại `backend/app/ai/tts/assets/static/`; định dạng yêu cầu là WAV mono, PCM signed 16-bit, 16 kHz. Repository có sẵn clip cho `common.action_failed`, `common.action_success`, `common.device_unavailable`, `common.ready`, `common.understood`, `lights.turned_off` và `lights.turned_on`; các key còn lại chưa có file nên trả `audio_played=false`/`status=unavailable` cho các key đó. Đây không phải backend crash. Không có microphone/loa hoặc voice Việt cũng không được làm backend API dừng hoạt động.
+Static clips được lưu theo manifest tại `backend/app/ai/tts/assets/static/`; định dạng yêu cầu là WAV mono, PCM signed 16-bit, 16 kHz. Repository hiện có file đúng định dạng cho cả 14 key. Sau khi đồng bộ các file lên Pi, dùng endpoint status/play để xác nhận `missing_static_assets` rỗng và thử phát từng key. Không có microphone/loa hoặc voice Việt cũng không được làm backend API dừng hoạt động.
 
 Yêu cầu đọc cảm biến (TTS cần sensor readings mới hơn `VOICE_SENSOR_MAX_AGE_SECONDS`, mặc định 15 giây):
 
